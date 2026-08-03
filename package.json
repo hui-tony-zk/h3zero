@@ -1,0 +1,20 @@
+{
+  "name": "h3zero",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "setup": "node scripts/h3.mjs setup",
+    "modal-setup": "node scripts/h3.mjs modal-setup",
+    "models": "node scripts/h3.mjs models",
+    "deploy": "node scripts/h3.mjs deploy",
+    "frontend:dev": "npm --prefix frontend run dev",
+    "frontend:build": "npm --prefix frontend run build",
+    "generate": "node scripts/h3.mjs generate",
+    "smoke": "node scripts/h3.mjs smoke",
+    "test": "node scripts/h3.mjs test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

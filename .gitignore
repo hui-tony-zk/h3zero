@@ -1,0 +1,35 @@
+# Local configuration
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+
+# Generated media and scratch files
+outputs/
+*.mp4
+*.webm
+*.log
+.tmp/
+tmp/
+temp/
+.cache/
+
+# Editors / operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Agent scratch
+.codex*/
+.playwright-mcp/

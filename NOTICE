@@ -1,0 +1,8 @@
+minimax-h3-modal
+Copyright 2026 The minimax-h3-modal contributors
+
+This product includes software developed for the minimax-h3-modal project.
+
+The MiniMax H3 model weights are not included in this product. They are fetched
+from their upstream repository and remain subject to MiniMax's separate model
+license. See MODEL_NOTICE.md.

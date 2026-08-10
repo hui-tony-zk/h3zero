@@ -1,6 +1,6 @@
 {
   "name": "h3zero",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,6 +8,7 @@
     "modal-setup": "node scripts/h3.mjs modal-setup",
     "models": "node scripts/h3.mjs models",
     "deploy": "node scripts/h3.mjs deploy",
+    "deploy:gpu": "node scripts/h3.mjs deploy-gpu",
     "frontend:dev": "npm --prefix frontend run dev",
     "frontend:build": "npm --prefix frontend run build",
     "generate": "node scripts/h3.mjs generate",

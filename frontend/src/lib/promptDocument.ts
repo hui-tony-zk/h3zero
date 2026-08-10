@@ -4,6 +4,14 @@ import { PROMPT_SECTION_NODE, promptSectionId, promptSectionLabel } from "./prom
 import { parsePromptTaskTypes, PROMPT_TASK_TYPE_NODE, promptTaskTypeText } from "./promptTaskTypes";
 
 export const REFERENCE_MENTION_NODE = "referenceMention";
+export const REFERENCE_TOKEN_PATTERN = "<(?:Picture|Video|Audio) \\d+>";
+
+export function normalizeReferenceToken(value: string) {
+  const match = value.match(/^<(picture|video|audio) (\d+)>$/i);
+  if (!match) return null;
+  const prefix = `${match[1][0].toUpperCase()}${match[1].slice(1).toLowerCase()}`;
+  return `<${prefix} ${Number(match[2])}>`;
+}
 
 export function emptyPromptDocument(): PromptDocument {
   return { type: "doc", content: [{ type: "paragraph" }] };
@@ -24,22 +32,34 @@ export function referenceTokenMap(references: MediaAsset[]) {
   return { byId, byToken };
 }
 
+export function restoreReferenceTokens(value: string, references: MediaAsset[]) {
+  const { byId } = referenceTokenMap(references);
+  return references.reduce((text, asset) => {
+    const token = byId.get(asset.id);
+    if (!token) return text;
+    return [asset.name, asset.id].reduce((next, legacyLabel) => (
+      legacyLabel && legacyLabel !== token ? next.replaceAll(legacyLabel, token) : next
+    ), text);
+  }, value);
+}
+
 function textNodes(value: string, references: MediaAsset[]): JSONContent[] {
   const { byToken } = referenceTokenMap(references);
-  const pattern = /<(?:Picture|Video|Audio) \d+>|\[(?:reference generation|keyframe completion|video editing|video continuation|audio reuse|audio reference)(?: \+ (?:reference generation|keyframe completion|video editing|video continuation|audio reuse|audio reference))*\]/g;
+  const pattern = new RegExp(`${REFERENCE_TOKEN_PATTERN}|\\[(?:reference generation|keyframe completion|video editing|video continuation|audio reuse|audio reference)(?: \\+ (?:reference generation|keyframe completion|video editing|video continuation|audio reuse|audio reference))*\\]`, "gi");
   const nodes: JSONContent[] = [];
   let cursor = 0;
   for (const match of value.matchAll(pattern)) {
     const index = match.index ?? 0;
     if (index > cursor) nodes.push({ type: "text", text: value.slice(cursor, index) });
-    const asset = byToken.get(match[0]);
+    const referenceToken = normalizeReferenceToken(match[0]);
+    const asset = referenceToken ? byToken.get(referenceToken) : undefined;
     const taskTypes = parsePromptTaskTypes(match[0]);
     if (taskTypes) {
       nodes.push({ type: PROMPT_TASK_TYPE_NODE, attrs: { types: taskTypes } });
     } else if (asset) {
       nodes.push({
         type: REFERENCE_MENTION_NODE,
-        attrs: { id: asset.id, label: asset.name, kind: asset.kind },
+        attrs: { id: asset.id, label: asset.name, kind: asset.kind, token: referenceToken },
       });
     } else {
       nodes.push({ type: "text", text: match[0] });

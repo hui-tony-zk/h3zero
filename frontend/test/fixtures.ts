@@ -1,10 +1,10 @@
 import type { H3Specs, MediaAsset } from "../src/types";
 
 export const specs: H3Specs = {
-  version: "1.0",
+  version: "1.1",
   modes: {
     frames: { available: true, attachments: { mime_types: ["image/png"], max_bytes_each: 20 * 1024 * 1024 } },
-    references: { available: true, order: "newest_to_oldest", attachments: {
+    references: { available: true, order: "upload_order", attachments: {
       max_sources: 12, max_images: 9, max_videos: 3, max_audios: 3, audio_may_not_be_sole_modality: true,
       image: { mime_types: ["image/png"], max_bytes_each: 20 * 1024 * 1024 },
       video: { mime_types: ["video/mp4"], max_bytes_each: 512 * 1024 * 1024, min_seconds_each: 2, max_seconds_each: 15, max_seconds_total: 15 },
@@ -12,6 +12,7 @@ export const specs: H3Specs = {
     } },
   },
   output: {
+    sampling: { method: "MiniMax-H3 Turbo LoRA", lora: "minimax_h3_turbo_v4_step600_ema.safetensors", preview: true, steps: { default: 8, min: 4, max: 8 }, sampler: "minimax_h3_turbo", scheduler: "simple", lora_strength: 1, low_vram: false },
     duration: { default_seconds: 5, options: [{ requested_seconds: 5, frames: 124, actual_seconds: 124 / 24 }] },
     geometry: { multiple: 32, base_short_edge: 480, max_pixels: 480 * 864, native_aspects: [{ id: "9:16", width: 480, height: 864 }, { id: "16:9", width: 864, height: 480 }] },
   },

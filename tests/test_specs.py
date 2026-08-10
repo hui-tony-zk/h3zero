@@ -6,14 +6,22 @@ from minimax_h3.specs import get_specs, native_canvas
 class SpecsTests(unittest.TestCase):
     def test_authoritative_capabilities_snapshot(self):
         specs = get_specs()
-        self.assertEqual(specs["version"], "1.0")
+        self.assertEqual(specs["version"], "1.1")
         self.assertTrue(specs["modes"]["references"]["available"])
+        self.assertEqual(specs["modes"]["references"]["order"], "upload_order")
         attachments = specs["modes"]["references"]["attachments"]
         self.assertEqual(attachments["max_sources"], 12)
         self.assertEqual(attachments["max_images"], 9)
         self.assertEqual(attachments["max_videos"], 3)
         self.assertEqual(attachments["max_audios"], 3)
         self.assertTrue(attachments["audio_may_not_be_sole_modality"])
+        sampling = specs["output"]["sampling"]
+        self.assertEqual(sampling["steps"], {"default": 8, "min": 4, "max": 8})
+        self.assertEqual(sampling["sampler"], "minimax_h3_turbo")
+        self.assertEqual(
+            sampling["lora"],
+            "minimax_h3_turbo_v4_step600_ema.safetensors",
+        )
 
     def test_native_aspects_and_duration_grid(self):
         specs = get_specs()

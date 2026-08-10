@@ -1,4 +1,4 @@
-import type { MediaAsset, MediaKind } from "../types";
+import type { FavoriteAsset, MediaAsset, MediaKind } from "../types";
 
 const DB_NAME = "h3-studio";
 const STORE_NAME = "draft-assets";
@@ -80,6 +80,18 @@ export async function loadAsset(id: string): Promise<MediaAsset | null> {
   const { blob, ...metadata } = stored;
   const file = new File([blob], metadata.name, { type: metadata.type });
   return { ...metadata, file, previewUrl: URL.createObjectURL(file) };
+}
+
+export async function saveFavoriteAsset(metadata: FavoriteAsset, blob: Blob) {
+  const file = new File([blob], metadata.name, { type: metadata.type });
+  const asset: MediaAsset = {
+    ...metadata,
+    size: file.size,
+    file,
+    previewUrl: URL.createObjectURL(file),
+  };
+  await saveAsset(asset);
+  return asset;
 }
 
 export function aspectRatio(asset: MediaAsset) {

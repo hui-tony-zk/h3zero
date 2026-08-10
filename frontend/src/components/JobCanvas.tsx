@@ -1,11 +1,12 @@
-import { AlertCircle, ArrowDownToLine, Expand, Film, LoaderCircle, Trash2, X } from "lucide-react";
+import { AlertCircle, ArrowDownToLine, Expand, Film, Heart, LoaderCircle, Trash2, X } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useState, type CSSProperties } from "react";
+import { groupJobs } from "../lib/jobs";
 import type { Job } from "../types";
 import { RemixIcon } from "./icons";
 
 function isActive(job: Job) {
-  return job.status === "queued" || job.status === "running";
+  return job.status === "uploading" || job.status === "queued" || job.status === "running";
 }
 
 function aspectNumber(job: Job) {
@@ -17,7 +18,13 @@ function aspectNumber(job: Job) {
 
 function activeCopy(job: Job) {
   if (job.progress?.message) return job.progress.message;
+  if (job.status === "uploading") return "Uploading inputs";
   return job.status === "queued" ? "Waiting for a worker" : "H3 is generating video and sound";
+}
+
+function batchStartPadding(job: Job) {
+  const halfWidthLimitedHeight = 41 / aspectNumber(job);
+  return `max(1rem, calc(50% - max(130px, min(26dvh, 280px, ${halfWidthLimitedHeight}vw))))`;
 }
 
 function JobVideo({ job }: { job: Job }) {
@@ -44,13 +51,15 @@ function FullscreenVideo({ job, onClose }: { job: Job; onClose: () => void }) {
   );
 }
 
-function JobCard({ job, onRemix, onDelete, onView }: {
+function JobCard({ job, favoritePending, onFavorite, onRemix, onDelete, onCancel, onView }: {
   job: Job;
+  favoritePending: boolean;
+  onFavorite: () => void;
   onRemix: () => void;
-  onDelete: () => Promise<void>;
+  onDelete: () => void;
+  onCancel: () => void;
   onView: () => void;
 }) {
-  const [deleting, setDeleting] = useState(false);
   const active = isActive(job);
   const failed = job.status === "failed" || job.status === "expired" || job.status === "cancelled";
   const progress = job.progress?.percent;
@@ -60,16 +69,6 @@ function JobCard({ job, onRemix, onDelete, onView }: {
     aspectRatio: ratio,
     width: "min(82vw, calc(min(52dvh, 560px) * var(--job-aspect)))",
   } as CSSProperties;
-
-  const remove = async () => {
-    if (deleting) return;
-    setDeleting(true);
-    try {
-      await onDelete();
-    } finally {
-      setDeleting(false);
-    }
-  };
 
   return (
     <motion.article
@@ -91,6 +90,18 @@ function JobCard({ job, onRemix, onDelete, onView }: {
         </div>
       )}
 
+      {job.status === "completed" && <button
+        type="button"
+        disabled={favoritePending}
+        onClick={(event) => { event.stopPropagation(); onFavorite(); }}
+        className={`absolute right-3 top-3 flex size-8 items-center justify-center rounded-full border backdrop-blur-md transition-colors disabled:opacity-55 ${job.hearted ? "border-pink-300/35 bg-pink-500/18 text-pink-300" : "border-white/12 bg-black/62 text-white/72 hover:bg-black hover:text-white"}`}
+        aria-label={job.hearted ? "Remove from favorites" : "Add to favorites"}
+        aria-pressed={job.hearted === true}
+        title={job.hearted ? "Unfavorite" : "Favorite"}
+      >
+        {favoritePending ? <LoaderCircle size={13} className="animate-spin" /> : <Heart size={14} className={job.hearted ? "fill-current" : ""} />}
+      </button>}
+
       {(active || failed) && (
         <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black via-black/88 to-transparent px-4 pb-14 pt-16">
           <div className="flex items-end justify-between gap-4">
@@ -106,16 +117,16 @@ function JobCard({ job, onRemix, onDelete, onView }: {
         </div>
       )}
 
-      <div className="absolute bottom-3 right-3 flex gap-1.5">
+      {job.status !== "uploading" && <div className="absolute bottom-3 right-3 flex gap-1.5">
         <button type="button" onClick={(event) => { event.stopPropagation(); onRemix(); }} className="flex size-8 items-center justify-center rounded-full border border-white/12 bg-black/62 text-white/75 backdrop-blur-md hover:bg-black hover:text-white" aria-label="Remix this job" title="Remix"><RemixIcon size={13} /></button>
         {job.status === "completed" && <button type="button" onClick={(event) => { event.stopPropagation(); onView(); }} className="flex size-8 items-center justify-center rounded-full border border-white/12 bg-black/62 text-white/75 backdrop-blur-md hover:bg-black hover:text-white" aria-label="Open video fullscreen" title="Fullscreen"><Expand size={13} /></button>}
-        <button type="button" disabled={deleting} onClick={(event) => { event.stopPropagation(); void remove(); }} className="flex size-8 items-center justify-center rounded-full border border-white/12 bg-black/62 text-white/75 backdrop-blur-md hover:bg-red-500 hover:text-white disabled:opacity-40" aria-label={active ? "Cancel and delete job" : "Delete job"} title={active ? "Cancel job" : "Delete"}>{deleting ? <LoaderCircle size={13} className="animate-spin" /> : <Trash2 size={13} />}</button>
-      </div>
+        <button type="button" onClick={(event) => { event.stopPropagation(); if (active) onCancel(); else onDelete(); }} className="flex size-8 items-center justify-center rounded-full border border-white/12 bg-black/62 text-white/75 backdrop-blur-md hover:bg-red-500 hover:text-white" aria-label={active ? "Cancel job" : "Delete job"} title={active ? "Cancel job" : "Delete"}><Trash2 size={13} /></button>
+      </div>}
     </motion.article>
   );
 }
 
-export function JobCanvas({ jobs, onRemix, onDelete }: { jobs: Job[]; onRemix: (job: Job) => void; onDelete: (job: Job) => Promise<void> }) {
+export function JobCanvas({ jobs, favoritePendingIds, onFavorite, onRemix, onDelete, onCancel }: { jobs: Job[]; favoritePendingIds: Set<string>; onFavorite: (job: Job) => void; onRemix: (job: Job) => void; onDelete: (job: Job) => void; onCancel: (job: Job) => void }) {
   const [viewer, setViewer] = useState<Job | null>(null);
 
   if (!jobs.length) {
@@ -130,11 +141,17 @@ export function JobCanvas({ jobs, onRemix, onDelete }: { jobs: Job[]; onRemix: (
     );
   }
 
+  const batches = groupJobs(jobs);
+
   return (
     <>
-      <main className="flex min-h-dvh flex-col justify-center pb-24">
-        <div className={`flex w-full items-center gap-3 overflow-x-auto px-[9vw] pb-5 pt-3 [scrollbar-color:rgba(255,255,255,0.22)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb:hover]:bg-white/40 [&::-webkit-scrollbar-track]:mx-[12vw] [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-track]:bg-white/[0.045] sm:gap-5 sm:px-[12vw] ${jobs.length === 1 ? "justify-center" : ""}`} aria-label="Video jobs">
-          {jobs.map((job) => <JobCard key={job.id} job={job} onRemix={() => onRemix(job)} onDelete={() => onDelete(job)} onView={() => setViewer(job)} />)}
+      <main className="h-dvh overflow-hidden pb-[60px] pt-12">
+        <div className="flex h-full w-full gap-3 overflow-x-auto px-[9vw] [scrollbar-color:rgba(255,255,255,0.22)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb:hover]:bg-white/40 [&::-webkit-scrollbar-track]:mx-[12vw] [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-track]:bg-white/[0.045] sm:gap-5 sm:px-[12vw]" aria-label="Video batches">
+          {batches.map((batch) => <section key={batch.id} aria-label="Generation batch" className="h-full shrink-0 overflow-y-auto overscroll-y-contain [scrollbar-color:rgba(255,255,255,0.16)_transparent] [scrollbar-width:thin]">
+            <div style={batch.jobs.length > 1 ? { paddingTop: batchStartPadding(batch.jobs[0]) } : undefined} className={`flex min-h-full flex-col items-center gap-3 pb-4 sm:gap-5 ${batch.jobs.length === 1 ? "justify-center pt-4" : "justify-start"}`}>
+              {batch.jobs.map((job) => <JobCard key={job.id} job={job} favoritePending={favoritePendingIds.has(job.id)} onFavorite={() => onFavorite(job)} onRemix={() => onRemix(job)} onDelete={() => onDelete(job)} onCancel={() => onCancel(job)} onView={() => setViewer(job)} />)}
+            </div>
+          </section>)}
         </div>
       </main>
       <AnimatePresence>{viewer && <FullscreenVideo job={viewer} onClose={() => setViewer(null)} />}</AnimatePresence>

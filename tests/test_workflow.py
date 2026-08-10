@@ -25,7 +25,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(aligned_frame_count(15), 362)
         self.assertEqual(aligned_frame_count(5) % 17, 5)
 
-    def test_builds_official_t2v_graph(self):
+    def test_builds_turbo_t2v_graph(self):
         workflow = build_frames_workflow(
             prompt="A lighthouse in a storm. Audio: waves and distant thunder.",
             width=864,
@@ -39,6 +39,26 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("SaveVideo", classes)
         self.assertEqual(workflow["conditioning"]["inputs"]["length"], 124)
         self.assertEqual(workflow["noise"]["inputs"]["noise_seed"], 42)
+        self.assertEqual(
+            workflow["model"]["inputs"]["unet_name"],
+            "minimax_h3_fl2va_int8_convrot.safetensors",
+        )
+        self.assertEqual(
+            workflow["clip"]["inputs"]["clip_name"],
+            "qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
+        )
+        self.assertEqual(workflow["turbo_lora"]["class_type"], "MiniMaxH3TurboLoRA")
+        self.assertEqual(workflow["turbo_lora"]["inputs"], {
+            "model": ["model", 0],
+            "lora_name": "minimax_h3_turbo_v4_step600_ema.safetensors",
+            "strength": 1.0,
+            "low_vram": False,
+        })
+        self.assertEqual(workflow["sampler"]["class_type"], "MiniMaxH3TurboSampler")
+        self.assertEqual(workflow["scheduler"]["inputs"]["steps"], 8)
+        self.assertEqual(workflow["scheduler"]["inputs"]["scheduler"], "simple")
+        self.assertEqual(workflow["scheduler"]["inputs"]["model"], ["turbo_lora", 0])
+        self.assertEqual(workflow["guider"]["inputs"]["model"], ["turbo_lora", 0])
 
     def test_optional_keyframes_add_load_nodes(self):
         workflow = build_frames_workflow(
@@ -120,7 +140,7 @@ class WorkflowTests(unittest.TestCase):
         )
         self.assertEqual(
             workflow["model"]["inputs"]["unet_name"],
-            "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+            "minimax_h3_ref2va_int8_convrot.safetensors",
         )
         self.assertEqual(
             workflow["conditioning"]["class_type"],
@@ -133,6 +153,28 @@ class WorkflowTests(unittest.TestCase):
             ["reference_components_2", 1],
         )
         self.assertEqual(workflow["load_reference_0"]["class_type"], "LoadAudio")
+        self.assertEqual(workflow["turbo_lora"]["class_type"], "MiniMaxH3TurboLoRA")
+        self.assertEqual(workflow["sampler"]["class_type"], "MiniMaxH3TurboSampler")
+
+    def test_rejects_non_turbo_sampling_settings(self):
+        with self.assertRaisesRegex(ValueError, "between 4 and 8"):
+            build_frames_workflow(
+                prompt="Too few steps",
+                width=864,
+                height=480,
+                duration_seconds=5,
+                seed=1,
+                steps=3,
+            )
+        with self.assertRaisesRegex(ValueError, "minimax_h3_turbo"):
+            build_frames_workflow(
+                prompt="Wrong sampler",
+                width=864,
+                height=480,
+                duration_seconds=5,
+                seed=1,
+                sampler="res_multistep",
+            )
 
 
 if __name__ == "__main__":

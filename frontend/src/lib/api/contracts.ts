@@ -37,11 +37,12 @@ function metadata(value: unknown): GenerationMetadata | undefined {
 
 export function parseSpecs(value: unknown): H3Specs {
   const source = record(value);
-  if (source.version !== "1.0") throw new Error(`Unsupported H3 spec version: ${String(source.version)}`);
+  if (source.version !== "1.1") throw new Error(`Unsupported H3 spec version: ${String(source.version)}`);
   const modes = record(source.modes);
   record(modes.frames);
   record(modes.references);
   const output = record(source.output);
+  record(output.sampling);
   record(output.duration);
   record(output.geometry);
   return source as unknown as H3Specs;

@@ -30,18 +30,27 @@ async function buildFrontend() {
 }
 
 export async function downloadModels(python) {
-  console.log("Downloading the pinned MiniMax H3 FL2VA + Ref2VA weights (~59 GiB)...");
+  console.log("Downloading the pinned MiniMax H3 FL2VA + Ref2VA weights (~94 GiB)...");
   await run(
     python,
-    ["-m", "modal", "run", "modal_services/h3.py::download_models"],
+    ["-m", "modal", "run", "modal_services/h3_gpu.py::download_models"],
     { env: modalEnvironment() },
   );
 }
 
-export async function deployApp(python) {
+export async function deployGpuApp(python) {
+  console.log("Deploying the MiniMax H3 GPU worker...");
+  await run(
+    python,
+    ["-m", "modal", "deploy", "modal_services/h3_gpu.py"],
+    { env: modalEnvironment() },
+  );
+}
+
+export async function deployWebApp(python) {
   await buildFrontend();
   const expectedBundle = expectedBundleName(join(ROOT, "frontend", "dist", "index.html"));
-  console.log("Deploying the MiniMax H3 worker, gateway, and compiled frontend...");
+  console.log("Deploying the H3Zero gateway and compiled frontend...");
   const output = await runCapture(
     python,
     ["-m", "modal", "deploy", "modal_services/h3.py"],

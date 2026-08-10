@@ -44,7 +44,7 @@ When setup finishes, open the printed URL:
 web => https://your-workspace--minimax-h3-web.modal.run
 ```
 
-> **First setup is not one minute:** about 59 GiB of weights plus the GPU image
+> **First setup is not one minute:** about 94 GiB of weights plus the GPU image
 > build. Interrupted? Run `npm run setup` again; completed downloads are reused.
 
 > **Public endpoint:** anyone with the URL can start paid GPU work.
@@ -58,7 +58,7 @@ web => https://your-workspace--minimax-h3-web.modal.run
 - Modal browser authentication
 - Public model weights → Modal Volume
 - Frontend install + build
-- Modal deployment + verification
+- Separate GPU-worker and public-web deployments + frontend verification
 
 **Zero manual setup for:** npm packages · virtualenv · Hugging Face account/token
 · copied API keys
@@ -71,6 +71,10 @@ web => https://your-workspace--minimax-h3-web.modal.run
 - **Access:** public and unauthenticated
 
 </details>
+
+After setup, `npm run deploy` rebuilds and deploys only the gateway/frontend.
+It leaves the GPU worker and its CPU memory snapshots untouched. Run
+`npm run deploy:gpu` only after intentional worker, runtime, or workflow changes.
 
 <details>
 <summary><strong>Let a coding agent set it up</strong></summary>
@@ -125,11 +129,27 @@ npm run generate -- --prompt "A lighthouse in a night storm. Audio: waves and th
 
 ![First and last frame direction in H3Zero](docs/images/h3-first-last-frames.png)
 
+### Eight-step Turbo sampling
+
+Turbo cuts a 15-second, 480p generation to about 1.5 minutes on the current
+RTX PRO 6000 deployment after the worker is warm. Cold starts and model loading
+add time, and actual speed varies with Modal capacity.
+
+- Both frame and reference workflows use the
+  [MiniMax-H3 Turbo LoRA](https://huggingface.co/larryvrh/MiniMax-H3-Turbo-Lora)
+- Eight sampling steps by default, within the recommended 4–8 step range
+- Current v4-600 EMA checkpoint and companion ComfyUI nodes pinned together
+- Version-adaptive sampling for ComfyUI's native video/audio sigma handling
+
+The Turbo release is a preview. Its author notes that audio and fast, intense
+motion are still being improved; H3Zero uses the recommended strength of `1.0`.
+
 ### Jobs survive the browser
 
 - Durable, asynchronous jobs
 - Queue → loading → sampling → decoding → complete
 - Visible progress; results persist until deleted
+- Modal cloud-synced favorites, including saved source inputs for cross-device remixing
 
 ![Two completed durable video jobs in the H3Zero carousel](docs/images/h3-video-carousel.png)
 
@@ -137,7 +157,7 @@ npm run generate -- --prompt "A lighthouse in a night storm. Audio: waves and th
 
 ### Automate through the API
 
-- Same deployment and URL as H3Zero
+- Same public URL as H3Zero
 - Submit, poll, download, cancel, and delete jobs
 - Zero second service or separate API deployment
 

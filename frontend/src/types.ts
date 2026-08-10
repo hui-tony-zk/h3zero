@@ -2,6 +2,7 @@ import type { JSONContent } from "@tiptap/core";
 
 export type GenerationMode = "frames" | "references";
 export type AspectId = "9:16" | "16:9";
+export type GenerationCount = 1 | 2 | 3;
 export type MediaKind = "image" | "video" | "audio" | "file";
 export type PromptDocument = JSONContent;
 
@@ -24,6 +25,7 @@ export interface BaseDraft {
   promptDocument: PromptDocument;
   duration: number;
   aspect: AspectId;
+  generationCount: GenerationCount;
 }
 
 export interface FramesDraft extends BaseDraft {
@@ -62,7 +64,7 @@ export interface FramesModeSpec {
 
 export interface ReferencesModeSpec {
   available: boolean;
-  order: "newest_to_oldest";
+  order: "newest_to_oldest" | "upload_order";
   attachments: {
     max_sources: number;
     max_images: number;
@@ -76,12 +78,22 @@ export interface ReferencesModeSpec {
 }
 
 export interface H3Specs {
-  version: "1.0";
+  version: "1.1";
   modes: {
     frames: FramesModeSpec;
     references: ReferencesModeSpec;
   };
   output: {
+    sampling: {
+      method: string;
+      lora: string;
+      preview: boolean;
+      steps: { default: number; min: number; max: number };
+      sampler: string;
+      scheduler: string;
+      lora_strength: number;
+      low_vram: boolean;
+    };
     duration: {
       default_seconds: number;
       options: Array<{ requested_seconds: number; frames: number; actual_seconds: number }>;
@@ -95,7 +107,7 @@ export interface H3Specs {
   };
 }
 
-export type JobStatus = "queued" | "running" | "completed" | "failed" | "expired" | "cancelled";
+export type JobStatus = "uploading" | "queued" | "running" | "completed" | "failed" | "expired" | "cancelled";
 
 export interface GenerationMetadata {
   model?: string;
@@ -108,6 +120,9 @@ export interface GenerationMetadata {
   steps?: number;
   sampler?: string;
   scheduler?: string;
+  lora?: string;
+  lora_strength?: number;
+  lora_low_vram?: boolean;
 }
 
 export interface JobProgress {
@@ -115,6 +130,19 @@ export interface JobProgress {
   message: string;
   updatedAt: number;
   percent?: number;
+}
+
+export interface FavoriteAsset {
+  id: string;
+  name: string;
+  type: string;
+  kind: Exclude<MediaKind, "file">;
+  size: number;
+  width?: number;
+  height?: number;
+  duration?: number;
+  createdAt: number;
+  role?: "firstFrame" | "lastFrame" | "reference";
 }
 
 export interface Job {
@@ -135,6 +163,11 @@ export interface Job {
   error?: string;
   metadata?: GenerationMetadata;
   progress?: JobProgress;
+  batchId?: string;
+  batchIndex?: number;
+  batchSize?: number;
+  hearted?: boolean;
+  favoriteAssets?: FavoriteAsset[];
 }
 
 export interface JobCreateResponse {

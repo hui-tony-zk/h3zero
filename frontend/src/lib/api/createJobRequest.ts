@@ -43,9 +43,9 @@ export function buildCreateJobRequest(draft: ComposerDraft, specs: H3Specs) {
     width: frame?.width ?? preset.width,
     height: frame?.height ?? preset.height,
     duration_seconds: draft.duration,
-    steps: 20,
-    sampler: "res_multistep",
-    scheduler: draft.mode === "references" ? "normal" : "simple",
+    steps: specs.output.sampling.steps.default,
+    sampler: specs.output.sampling.sampler,
+    scheduler: specs.output.sampling.scheduler,
     geometry_source: frame?.geometrySource,
     references: draft.mode === "references" ? references : undefined,
   }));

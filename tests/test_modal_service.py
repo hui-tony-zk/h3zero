@@ -4,8 +4,51 @@ from pathlib import Path
 
 
 class ModalServiceDefinitionTests(unittest.TestCase):
+    def test_gpu_worker_and_public_web_are_separate_apps(self):
+        config = Path("minimax_h3/config.py").read_text(encoding="utf-8")
+        gpu_source = Path("modal_services/h3_gpu.py").read_text(encoding="utf-8")
+        web_source = Path("modal_services/h3.py").read_text(encoding="utf-8")
+
+        self.assertIn('WEB_APP_NAME = "minimax-h3"', config)
+        self.assertIn('GPU_APP_NAME = "minimax-h3-gpu"', config)
+        self.assertIn("app = modal.App(GPU_APP_NAME)", gpu_source)
+        self.assertIn("app = modal.App(WEB_APP_NAME)", web_source)
+        self.assertIn("class H3Service", gpu_source)
+        self.assertNotIn("class H3Service", web_source)
+        self.assertNotIn("def web(", gpu_source)
+        self.assertIn('modal.Cls.from_name(GPU_APP_NAME, "H3Service")', web_source)
+
+    def test_deploy_scripts_keep_frontend_and_gpu_lifecycles_separate(self):
+        deploy_source = Path("scripts/deploy/app.mjs").read_text(encoding="utf-8")
+        command_source = Path("scripts/h3.mjs").read_text(encoding="utf-8")
+
+        self.assertIn('"modal_services/h3.py"', deploy_source)
+        self.assertIn('"modal_services/h3_gpu.py"', deploy_source)
+        self.assertIn("await deployGpuApp(python);\n  await deployWebApp(python);", command_source)
+        deploy_body = command_source.split("async function deploy()", 1)[1].split(
+            "async function deployGpu()", 1
+        )[0]
+        self.assertIn("await deployWebApp(python);", deploy_body)
+        self.assertNotIn("deployGpuApp", deploy_body)
+
+    def test_turbo_dependencies_are_revision_pinned(self):
+        source = Path("modal_services/h3_gpu.py").read_text(encoding="utf-8")
+        self.assertIn(
+            'COMFY_COMMIT = "43cb4fffc89bba20ab7bd61467a36d0339338dab"',
+            source,
+        )
+        self.assertIn(
+            'TURBO_NODE_COMMIT = "55fee864dd7b2976b1c4ce3c3d5f7968f181409f"',
+            source,
+        )
+        self.assertIn(
+            'TURBO_REVISION = "afc0346516372a17162c14df3c5264de1d9aa1c0"',
+            source,
+        )
+        self.assertIn('"loras",', source)
+
     def test_h3_uses_cpu_memory_snapshot_lifecycle(self):
-        source = Path("modal_services/h3.py").read_text(encoding="utf-8")
+        source = Path("modal_services/h3_gpu.py").read_text(encoding="utf-8")
         tree = ast.parse(source)
         service = next(
             node

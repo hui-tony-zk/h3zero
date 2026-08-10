@@ -87,7 +87,6 @@
     font-weight: 650;
     line-height: 20px;
     white-space: nowrap;
-    user-select: none;
   }
 
   .ProseMirror-selectednode.h3-reference-mention {

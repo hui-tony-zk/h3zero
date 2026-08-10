@@ -9,7 +9,15 @@ FPS = 24
 CANVAS_MULTIPLE = 32
 BASE_SHORT_EDGE = 480
 MAX_PIXELS = 480 * 864
-SPEC_VERSION = "1.0"
+SPEC_VERSION = "1.1"
+TURBO_LORA = "minimax_h3_turbo_v4_step600_ema.safetensors"
+TURBO_LORA_STRENGTH = 1.0
+TURBO_LOW_VRAM = False
+TURBO_MIN_STEPS = 4
+TURBO_STEPS = 8
+TURBO_MAX_STEPS = 8
+TURBO_SAMPLER = "minimax_h3_turbo"
+TURBO_SCHEDULER = "simple"
 
 IMAGE_MIME_TYPES = ("image/png", "image/jpeg", "image/webp")
 VIDEO_MIME_TYPES = ("video/mp4", "video/quicktime", "video/webm")
@@ -102,7 +110,7 @@ _SPECS = {
         "frames": {
             "available": True,
             "model": "MiniMax-H3 Base FL2VA",
-            "checkpoint": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+            "checkpoint": "minimax_h3_fl2va_int8_convrot.safetensors",
             "attachments": {
                 "kinds": ["image"],
                 "max_images": 2,
@@ -119,8 +127,8 @@ _SPECS = {
         "references": {
             "available": True,
             "model": "MiniMax-H3 Base Ref2VA",
-            "checkpoint": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
-            "order": "newest_to_oldest",
+            "checkpoint": "minimax_h3_ref2va_int8_convrot.safetensors",
+            "order": "upload_order",
             "tags": {
                 "image": "<Picture N>",
                 "video": "<Video N>",
@@ -163,6 +171,20 @@ _SPECS = {
     },
     "output": {
         "fps": FPS,
+        "sampling": {
+            "method": "MiniMax-H3 Turbo LoRA",
+            "lora": TURBO_LORA,
+            "preview": True,
+            "steps": {
+                "default": TURBO_STEPS,
+                "min": TURBO_MIN_STEPS,
+                "max": TURBO_MAX_STEPS,
+            },
+            "sampler": TURBO_SAMPLER,
+            "scheduler": TURBO_SCHEDULER,
+            "lora_strength": TURBO_LORA_STRENGTH,
+            "low_vram": TURBO_LOW_VRAM,
+        },
         "audio": {
             "native": True,
             "always_generated": True,

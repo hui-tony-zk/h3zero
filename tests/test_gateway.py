@@ -203,6 +203,9 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(payload["first_frame"][:8], b"\x89PNG\r\n\x1a\n")
         self.assertEqual((payload["width"], payload["height"]), (480, 480))
         self.assertEqual(payload["geometry_source"], "first_frame")
+        self.assertEqual(payload["steps"], 8)
+        self.assertEqual(payload["sampler"], "minimax_h3_turbo")
+        self.assertEqual(payload["scheduler"], "simple")
 
         pending = self.client.get(f"/api/jobs/{job_id}")
         self.assertEqual(pending.json()["status"], "queued")
@@ -239,11 +242,135 @@ class GatewayTests(unittest.TestCase):
 
     def test_delete_cancels_pending_call_and_removes_job(self):
         job_id = self.submit()["id"]
+        events = []
+        original_cancel = self.call.cancel
+        original_commit = self.volume.commit.implementation
+
+        def tracked_cancel():
+            events.append("cancel")
+            original_cancel()
+
+        def tracked_commit():
+            events.append("commit")
+            original_commit()
+
+        self.call.cancel = tracked_cancel
+        self.volume.commit.implementation = tracked_commit
         response = self.client.delete(f"/api/jobs/{job_id}")
         self.assertEqual(response.status_code, 204)
         self.assertTrue(self.call.cancelled)
+        self.assertEqual(events[0], "cancel")
         self.assertEqual(self.client.get(f"/api/jobs/{job_id}").status_code, 404)
         self.assertTrue(jobs.is_deleted(job_id, self.output_root))
+
+    def test_favorites_sync_output_metadata_and_remix_sources(self):
+        job_id = self.submit()["id"]
+        path = jobs.video_path(job_id, self.output_root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"favorite-mp4")
+        jobs.update_job(
+            job_id,
+            root=self.output_root,
+            status="completed",
+            result={"seed": 9, "width": 480, "height": 480},
+        )
+        favorite_job = {
+            "id": job_id,
+            "mode": "frames",
+            "prompt": "client prompt is not authoritative",
+            "createdAt": 1234,
+            "updatedAt": 1234,
+            "status": "completed",
+            "duration": 5,
+            "aspect": "16:9",
+            "inputAssetIds": ["source-frame"],
+            "firstFrameId": "source-frame",
+            "contentUrl": "wrong",
+        }
+        asset_manifest = [{
+            "id": "source-frame",
+            "name": "first.png",
+            "type": "image/png",
+            "kind": "image",
+            "size": len(self.png()),
+            "width": 512,
+            "height": 512,
+            "createdAt": 1000,
+            "role": "firstFrame",
+        }]
+        saved = self.client.put(
+            f"/api/cloud-sync/tony/favorites/{job_id}",
+            data={"job": json.dumps(favorite_job), "assets": json.dumps(asset_manifest)},
+            files={"asset_0": ("first.png", self.png(), "image/png")},
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        self.assertTrue(saved.json()["hearted"])
+        self.assertEqual(saved.json()["prompt"], "A fox crossing fresh snow. Audio: soft wind.")
+        self.assertEqual(saved.json()["contentUrl"], f"/api/jobs/{job_id}/video")
+
+        snapshot = self.client.get("/api/cloud-sync/tony/favorites")
+        self.assertEqual(snapshot.status_code, 200)
+        self.assertEqual([item["id"] for item in snapshot.json()["jobs"]], [job_id])
+        self.assertEqual(snapshot.json()["username"], "tony")
+        self.assertEqual(self.client.get("/api/cloud-sync/other/favorites").json()["jobs"], [])
+        asset = self.client.get("/api/cloud-sync/tony/assets/source-frame")
+        self.assertEqual(asset.status_code, 200)
+        self.assertEqual(asset.content, self.png())
+
+        removed = self.client.delete(f"/api/cloud-sync/tony/favorites/{job_id}")
+        self.assertEqual(removed.status_code, 204)
+        self.assertEqual(self.client.get("/api/cloud-sync/tony/favorites").json()["jobs"], [])
+        self.assertEqual(self.client.get("/api/cloud-sync/tony/assets/source-frame").status_code, 404)
+        self.assertEqual(self.client.get(f"/api/jobs/{job_id}/video").content, b"favorite-mp4")
+
+    def test_deleting_a_job_also_removes_its_favorite(self):
+        job_id = self.submit()["id"]
+        path = jobs.video_path(job_id, self.output_root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"favorite-mp4")
+        jobs.update_job(job_id, root=self.output_root, status="completed", result={"seed": 9})
+        favorite_job = {
+            "id": job_id,
+            "createdAt": 1234,
+            "aspect": "16:9",
+            "inputAssetIds": ["source-frame"],
+            "firstFrameId": "source-frame",
+        }
+        assets = [{
+            "id": "source-frame", "name": "first.png", "type": "image/png",
+            "kind": "image", "role": "firstFrame",
+        }]
+        response = self.client.put(
+            f"/api/cloud-sync/tony/favorites/{job_id}",
+            data={"job": json.dumps(favorite_job), "assets": json.dumps(assets)},
+            files={"asset_0": ("first.png", self.png(), "image/png")},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+
+        self.assertEqual(self.client.delete(f"/api/jobs/{job_id}").status_code, 204)
+        self.assertEqual(self.client.get("/api/cloud-sync/tony/favorites").json()["jobs"], [])
+        self.assertEqual(self.client.get("/api/cloud-sync/tony/assets/source-frame").status_code, 404)
+
+    def test_favorite_rejects_unsafe_or_unrelated_assets(self):
+        job_id = self.submit()["id"]
+        path = jobs.video_path(job_id, self.output_root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"favorite-mp4")
+        jobs.update_job(job_id, root=self.output_root, status="completed", result={})
+        response = self.client.put(
+            f"/api/cloud-sync/tony/favorites/{job_id}",
+            data={
+                "job": json.dumps({"id": job_id, "inputAssetIds": ["safe-id"]}),
+                "assets": json.dumps([{
+                    "id": "../escape", "name": "bad.png", "type": "image/png", "kind": "image",
+                }]),
+            },
+            files={"asset_0": ("bad.png", self.png(), "image/png")},
+        )
+        self.assertEqual(response.status_code, 422)
+
+        invalid_username = self.client.get("/api/cloud-sync/x/favorites")
+        self.assertEqual(invalid_username.status_code, 422)
 
     def test_failed_and_expired_states_are_explicit(self):
         failed_id = self.submit()["id"]

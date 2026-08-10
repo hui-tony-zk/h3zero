@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { loadAsset, saveAsset } from "../lib/assets";
+import { loadAsset, saveAsset, saveFavoriteAsset } from "../lib/assets";
+import { getFavoriteAsset } from "../lib/api/client";
+import { readCloudSyncUsername } from "../lib/cloudSync";
 import { emptyFramesDraft, emptyReferencesDraft, readDrafts, writeDrafts } from "../lib/storage/draftRepository";
-import { promptDocumentToText, promptTextToDocument, prunePromptDocument } from "../lib/promptDocument";
+import { promptDocumentToText, promptTextToDocument, prunePromptDocument, restoreReferenceTokens } from "../lib/promptDocument";
 import type { BaseDraft, DraftCollection, GenerationMode, Job, MediaAsset } from "../types";
 
 const defaults: DraftCollection = { frames: emptyFramesDraft(), references: emptyReferencesDraft() };
@@ -36,7 +38,7 @@ export function useDrafts() {
   const addReferences = useCallback(async (assets: MediaAsset[]) => {
     await Promise.all(assets.map(saveAsset));
     setDrafts((current) => {
-      const references = [...assets].reverse().concat(current.references.references);
+      const references = current.references.references.concat(assets);
       return { ...current, references: { ...current.references, references, prompt: promptDocumentToText(current.references.promptDocument, references) } };
     });
   }, []);
@@ -50,13 +52,23 @@ export function useDrafts() {
   }, []);
 
   const restoreInputs = useCallback(async (job: Job) => {
+    const restoreAsset = async (id: string) => {
+      const local = await loadAsset(id);
+      if (local) return local;
+      const favorite = job.favoriteAssets?.find((asset) => asset.id === id);
+      if (!favorite) return null;
+      const username = readCloudSyncUsername();
+      if (!username) throw new Error("Set up Modal cloud sync to restore these inputs.");
+      return saveFavoriteAsset(favorite, await getFavoriteAsset(username, id));
+    };
     setActiveMode(job.mode);
     if (job.mode === "references") {
-      const references = (await Promise.all((job.referenceIds ?? job.inputAssetIds).map(loadAsset))).filter((asset): asset is MediaAsset => asset !== null);
-      setDrafts((current) => ({ ...current, references: { ...current.references, prompt: job.prompt, promptDocument: promptTextToDocument(job.prompt, references), duration: job.duration, aspect: job.aspect, references } }));
+      const references = (await Promise.all((job.referenceIds ?? job.inputAssetIds).map(restoreAsset))).filter((asset): asset is MediaAsset => asset !== null);
+      const prompt = restoreReferenceTokens(job.prompt, references);
+      setDrafts((current) => ({ ...current, references: { ...current.references, prompt, promptDocument: promptTextToDocument(prompt, references), duration: job.duration, aspect: job.aspect, references } }));
       return;
     }
-    const [firstFrame, lastFrame] = await Promise.all([job.firstFrameId ? loadAsset(job.firstFrameId) : null, job.lastFrameId ? loadAsset(job.lastFrameId) : null]);
+    const [firstFrame, lastFrame] = await Promise.all([job.firstFrameId ? restoreAsset(job.firstFrameId) : null, job.lastFrameId ? restoreAsset(job.lastFrameId) : null]);
     setDrafts((current) => ({ ...current, frames: { ...current.frames, prompt: job.prompt, promptDocument: promptTextToDocument(job.prompt), duration: job.duration, aspect: job.aspect, firstFrame, lastFrame } }));
   }, []);
 

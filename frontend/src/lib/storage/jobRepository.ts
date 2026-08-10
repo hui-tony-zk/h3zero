@@ -1,5 +1,4 @@
-import { contentUrl } from "../api/client";
-import type { AspectId, GenerationMode, Job, JobStatus } from "../../types";
+import type { AspectId, FavoriteAsset, GenerationMode, Job, JobStatus } from "../../types";
 
 const STORAGE_KEY = "h3-studio-jobs-v2";
 const aspects = new Set<AspectId>(["9:16", "16:9"]);
@@ -15,7 +14,31 @@ function status(value: unknown): JobStatus {
   return statuses.has(value as JobStatus) ? value as JobStatus : "failed";
 }
 
-function restore(value: unknown): Job | null {
+function restoreFavoriteAssets(value: unknown): FavoriteAsset[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+    const source = entry as Record<string, unknown>;
+    if (
+      typeof source.id !== "string" || typeof source.name !== "string"
+      || typeof source.type !== "string" || !["image", "video", "audio"].includes(String(source.kind))
+    ) return [];
+    return [{
+      id: source.id,
+      name: source.name,
+      type: source.type,
+      kind: source.kind as FavoriteAsset["kind"],
+      size: typeof source.size === "number" ? source.size : 0,
+      width: typeof source.width === "number" ? source.width : undefined,
+      height: typeof source.height === "number" ? source.height : undefined,
+      duration: typeof source.duration === "number" ? source.duration : undefined,
+      createdAt: typeof source.createdAt === "number" ? source.createdAt : 0,
+      role: ["firstFrame", "lastFrame", "reference"].includes(String(source.role)) ? source.role as FavoriteAsset["role"] : undefined,
+    }];
+  });
+}
+
+export function restoreJob(value: unknown): Job | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const source = value as Record<string, unknown>;
   if (typeof source.id !== "string" || !source.id) return null;
@@ -35,10 +58,15 @@ function restore(value: unknown): Job | null {
     firstFrameId: typeof source.firstFrameId === "string" ? source.firstFrameId : undefined,
     lastFrameId: typeof source.lastFrameId === "string" ? source.lastFrameId : undefined,
     referenceIds: referenceIds.length ? referenceIds : jobMode === "references" ? inputAssetIds : undefined,
-    contentUrl: jobStatus === "completed" ? contentUrl(source.id) : "",
+    contentUrl: jobStatus === "completed" ? `/api/jobs/${encodeURIComponent(source.id)}/video` : "",
     error: typeof source.error === "string" ? source.error : undefined,
     metadata: source.metadata && typeof source.metadata === "object" ? source.metadata as Job["metadata"] : undefined,
     progress: source.progress && typeof source.progress === "object" ? source.progress as Job["progress"] : undefined,
+    batchId: typeof source.batchId === "string" ? source.batchId : undefined,
+    batchIndex: typeof source.batchIndex === "number" ? source.batchIndex : undefined,
+    batchSize: typeof source.batchSize === "number" ? source.batchSize : undefined,
+    hearted: source.hearted === true,
+    favoriteAssets: restoreFavoriteAssets(source.favoriteAssets),
   };
 }
 
@@ -46,8 +74,10 @@ export function readJobs(): Job[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     const values = raw ? JSON.parse(raw) as unknown : [];
-    return Array.isArray(values) ? values.map(restore).filter((job): job is Job => job !== null) : [];
+    return Array.isArray(values) ? values.map(restoreJob).filter((job): job is Job => job !== null) : [];
   } catch { return []; }
 }
 
-export function writeJobs(jobs: Job[]) { localStorage.setItem(STORAGE_KEY, JSON.stringify(jobs)); }
+export function writeJobs(jobs: Job[]) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(jobs.filter((job) => job.status !== "uploading")));
+}

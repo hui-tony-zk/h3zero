@@ -34,8 +34,14 @@ from minimax_h3.specs import (
     get_specs,
     native_canvas,
 )
-from minimax_h3.workflow import validate_generation, validate_image_bytes
-from modal_services import jobs
+from minimax_h3.workflow import (
+    TURBO_SAMPLER,
+    TURBO_SCHEDULER,
+    TURBO_STEPS,
+    validate_generation,
+    validate_image_bytes,
+)
+from modal_services import favorites, jobs
 
 DEFAULT_CONFIG = {
     "mode": "frames",
@@ -43,9 +49,9 @@ DEFAULT_CONFIG = {
     "height": 480,
     "duration_seconds": 5,
     "seed": None,
-    "steps": 20,
-    "sampler": "res_multistep",
-    "scheduler": "simple",
+    "steps": TURBO_STEPS,
+    "sampler": TURBO_SAMPLER,
+    "scheduler": TURBO_SCHEDULER,
     "geometry_source": None,
     "ref_image_size": "match",
     "references": [],
@@ -433,7 +439,7 @@ def create_gateway(
     api.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["Content-Type"],
     )
 
@@ -576,6 +582,162 @@ def create_gateway(
     @api.get("/api/specs")
     def specs():
         return get_specs()
+
+    @api.get("/api/cloud-sync/{username}/favorites")
+    def get_favorites(username: str):
+        try:
+            username = favorites.normalize_username(username)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        reload()
+        return {"username": username, "jobs": favorites.list_favorites(username, root)}
+
+    @api.put("/api/cloud-sync/{username}/favorites/{job_id}")
+    async def put_favorite(username: str, job_id: str, request: Request):
+        try:
+            username = favorites.normalize_username(username)
+            jobs.validate_job_id(job_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        reload()
+        durable = jobs.read_job(job_id, root=root)
+        if (
+            durable is None
+            or durable.get("status") != "completed"
+            or not jobs.video_path(job_id, root).is_file()
+        ):
+            raise HTTPException(status_code=409, detail="only completed jobs can be favorited")
+
+        form = await request.form(max_files=12, max_fields=16, max_part_size=1024 * 1024)
+        job_value = form.get("job")
+        assets_value = form.get("assets")
+        if not isinstance(job_value, str) or not isinstance(assets_value, str):
+            await _close_form_uploads(form)
+            raise HTTPException(status_code=422, detail="job and assets JSON are required")
+
+        temporary_paths: list[Path] = []
+        try:
+            client_job = json.loads(job_value)
+            asset_declarations = json.loads(assets_value)
+            if not isinstance(client_job, dict) or not isinstance(asset_declarations, list):
+                raise ValueError("job must be an object and assets must be an array")
+            if len(asset_declarations) > MAX_REFERENCE_SOURCES:
+                raise ValueError(f"favorites accept at most {MAX_REFERENCE_SOURCES} source assets")
+
+            client_ids = client_job.get("inputAssetIds") or []
+            if not isinstance(client_ids, list) or any(not isinstance(value, str) for value in client_ids):
+                raise ValueError("inputAssetIds must be an array of strings")
+            allowed_asset_ids = set(client_ids)
+            for field_name in ("firstFrameId", "lastFrameId"):
+                value = client_job.get(field_name)
+                if isinstance(value, str):
+                    allowed_asset_ids.add(value)
+
+            sanitized_assets = []
+            seen_asset_ids = set()
+            for index, source in enumerate(asset_declarations):
+                if not isinstance(source, dict):
+                    raise ValueError(f"favorite asset {index} must be an object")
+                asset_id = favorites.validate_asset_id(str(source.get("id", "")))
+                if asset_id not in allowed_asset_ids or asset_id in seen_asset_ids:
+                    raise ValueError(f"favorite asset {index} is not a unique job input")
+                seen_asset_ids.add(asset_id)
+                kind = source.get("kind")
+                mime_type = str(source.get("type", "")).lower()
+                if kind not in {"image", "video", "audio"} or _kind_for_mime(mime_type) != kind:
+                    raise ValueError(f"favorite asset {index} has an invalid media type")
+                upload = form.get(f"asset_{index}")
+                if upload is None or not getattr(upload, "filename", ""):
+                    raise ValueError(f"favorite asset {index} file is missing")
+                if _content_type(upload) != mime_type:
+                    raise ValueError(f"favorite asset {index} MIME type does not match")
+                destination = favorites.asset_path(username, asset_id, root)
+                temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
+                temporary_paths.append(temporary)
+                max_bytes = {
+                    "image": MAX_IMAGE_BYTES,
+                    "video": MAX_VIDEO_BYTES,
+                    "audio": MAX_AUDIO_BYTES,
+                }[kind]
+                size = await _stage_upload(upload, temporary, max_bytes)
+                sanitized_assets.append({
+                    "id": asset_id,
+                    "name": Path(str(source.get("name") or getattr(upload, "filename", "asset"))).name,
+                    "type": mime_type,
+                    "kind": kind,
+                    "size": size,
+                    "width": source.get("width") if isinstance(source.get("width"), (int, float)) else None,
+                    "height": source.get("height") if isinstance(source.get("height"), (int, float)) else None,
+                    "duration": source.get("duration") if isinstance(source.get("duration"), (int, float)) else None,
+                    "createdAt": source.get("createdAt") if isinstance(source.get("createdAt"), (int, float)) else 0,
+                    "role": source.get("role") if source.get("role") in {"firstFrame", "lastFrame", "reference"} else None,
+                })
+
+            allowed_client_fields = {
+                "createdAt", "updatedAt", "aspect", "displayAspect", "inputAssetIds",
+                "firstFrameId", "lastFrameId", "referenceIds", "batchId", "batchIndex", "batchSize",
+            }
+            request_data = durable.get("request") or {}
+            result_data = durable.get("result") if isinstance(durable.get("result"), dict) else {}
+            favorite_record = {
+                key: value for key, value in client_job.items() if key in allowed_client_fields
+            }
+            favorite_record.update({
+                "id": job_id,
+                "mode": request_data.get("mode", "frames"),
+                "prompt": request_data.get("prompt", ""),
+                "status": "completed",
+                "duration": request_data.get("duration_seconds", 5),
+                "contentUrl": f"/api/jobs/{job_id}/video",
+                "metadata": result_data,
+                "hearted": True,
+                "favoriteAssets": sanitized_assets,
+            })
+
+            previous = favorites.read_favorite(username, job_id, root)
+            previous_ids = {
+                asset["id"] for asset in (previous or {}).get("favoriteAssets", [])
+                if isinstance(asset, dict) and isinstance(asset.get("id"), str)
+            }
+            for temporary, asset in zip(temporary_paths, sanitized_assets):
+                destination = favorites.asset_path(username, asset["id"], root)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                temporary.replace(destination)
+            favorites.write_favorite(username, favorite_record, root)
+            favorites.remove_unreferenced(username, previous_ids, root)
+            commit()
+            return favorite_record
+        except (json.JSONDecodeError, ValueError) as exc:
+            for temporary in temporary_paths:
+                temporary.unlink(missing_ok=True)
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        finally:
+            await _close_form_uploads(form)
+
+    @api.delete("/api/cloud-sync/{username}/favorites/{job_id}", status_code=204)
+    def delete_favorite(username: str, job_id: str):
+        try:
+            username = favorites.normalize_username(username)
+            jobs.validate_job_id(job_id)
+            reload()
+            favorites.delete_favorite(username, job_id, root)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="favorite not found") from exc
+        commit()
+        return Response(status_code=204)
+
+    @api.get("/api/cloud-sync/{username}/assets/{asset_id}")
+    def get_favorite_asset(username: str, asset_id: str):
+        try:
+            username = favorites.normalize_username(username)
+            reload()
+            path = favorites.asset_path(username, asset_id, root)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="favorite asset not found") from exc
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="favorite asset not found")
+        return FileResponse(path, headers={"Cache-Control": "private, max-age=3600"})
 
     @api.post("/api/jobs", status_code=202)
     async def create_job(request: Request):
@@ -745,13 +907,16 @@ def create_gateway(
         if record is None:
             raise HTTPException(status_code=404, detail="job not found")
         jobs.mark_deleted(job_id, root=root)
-        commit()
         call_id = record.get("call_id") or jobs.read_call_id(job_id, root)
+        # Cancellation is latency-sensitive: do it before either durable
+        # Volume commit so queued GPU work has the best chance of never starting.
         if call_id and record["status"] in {"queued", "running"}:
             try:
                 function_call_from_id(call_id).cancel()
             except Exception:
                 pass
+        commit()
+        favorites.delete_job_favorites(job_id, root)
         jobs.delete_job_artifacts(job_id, root=root)
         delete_progress(job_id)
         commit()

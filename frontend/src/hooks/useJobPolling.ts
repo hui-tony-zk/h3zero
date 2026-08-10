@@ -1,6 +1,5 @@
 import { useEffect, useRef } from "react";
 import { ApiError, contentUrl, getJobStatus } from "../lib/api/client";
-import { isActiveJob } from "../lib/jobs";
 import type { Job } from "../types";
 
 export function useJobPolling(jobs: Job[], updateJob: (id: string, patch: Partial<Job>) => void) {
@@ -11,7 +10,7 @@ export function useJobPolling(jobs: Job[], updateJob: (id: string, patch: Partia
     let stopped = false;
     let timer = 0;
     const poll = async () => {
-      const active = jobsRef.current.filter(isActiveJob);
+      const active = jobsRef.current.filter((job) => job.status === "queued" || job.status === "running");
       if (active.length) await Promise.all(active.map(async (job) => {
         try {
           const result = await getJobStatus(job.id);

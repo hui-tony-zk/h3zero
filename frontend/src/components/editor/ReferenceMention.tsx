@@ -17,6 +17,7 @@ type MenuHandle = { onKeyDown: (props: SuggestionKeyDownProps) => boolean };
 type RecipeOption = { id: ReferenceRecipe; label: string; description: string; preview: string };
 
 const imageRecipes: RecipeOption[] = [
+  { id: "as-is", label: "Use as is", description: "Insert only the picture tag without adding prompt instructions.", preview: "<Picture N>" },
   { id: "subject", label: "Subject source", description: "Define a reusable character, object, setting, costume, or style.", preview: "<Subject N> is … shown in <Picture N>." },
   { id: "storyboard", label: "Storyboard reference", description: "Map the picture to a shot and state what it plans.", preview: "<Picture N> is a storyboard reference for [Shot N] …" },
   { id: "anchor", label: "Shot anchor", description: "Use the picture as an exact frame or composition anchor.", preview: "<Picture N> is the … of [Shot N] …" },
@@ -103,7 +104,7 @@ export function createReferenceMention(assets: MutableRefObject<MediaAsset[]>, m
     addNodeView: () => ReactNodeViewRenderer(Chip, { as: "span" }),
   }).configure({
     deleteTriggerWithBackspace: true,
-    renderText: ({ node }) => String(node.attrs.label ?? "Reference"),
+    renderText: ({ node }) => String(node.attrs.token ?? node.attrs.label ?? "Reference"),
     suggestion: {
       char: "@", placement: "top-start", offset: { mainAxis: 8 }, floatingUi: { middleware: [shift({ padding: 12 })] },
       allow: () => mode.current === "references" && assets.current.length > 0,

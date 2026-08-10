@@ -23,7 +23,7 @@ def progress_from_comfy_event(event: str, data: dict) -> dict | None:
     if node is None:
         return None
     node = str(node)
-    if node in {"model", "clip", "video_vae", "audio_vae"} or node.startswith(
+    if node in {"model", "turbo_lora", "clip", "video_vae", "audio_vae"} or node.startswith(
         "load_reference"
     ):
         return {"phase": "loading", "message": "Loading models and reference media"}

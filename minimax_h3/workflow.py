@@ -1,4 +1,4 @@
-"""Pure validation and ComfyUI workflow construction for MiniMax H3 Base."""
+"""Pure validation and ComfyUI workflow construction for MiniMax H3 Turbo."""
 
 from __future__ import annotations
 
@@ -9,17 +9,24 @@ from minimax_h3.specs import (
     FPS,
     MAX_IMAGE_BYTES,
     MAX_PIXELS,
+    TURBO_LORA,
+    TURBO_LORA_STRENGTH,
+    TURBO_LOW_VRAM,
+    TURBO_MAX_STEPS,
+    TURBO_MIN_STEPS,
+    TURBO_SAMPLER,
+    TURBO_SCHEDULER,
+    TURBO_STEPS,
     aligned_frame_count,
 )
 
-FRAME_DIFFUSION_MODEL = "minimax_h3_fl2va_pruned_int8_convrot.safetensors"
-REFERENCE_DIFFUSION_MODEL = "minimax_h3_ref2va_pruned_int8_convrot.safetensors"
-TEXT_ENCODER = "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
+FRAME_DIFFUSION_MODEL = "minimax_h3_fl2va_int8_convrot.safetensors"
+REFERENCE_DIFFUSION_MODEL = "minimax_h3_ref2va_int8_convrot.safetensors"
+TEXT_ENCODER = "qwen3vl_32b_minimax_h3_int8_convrot.safetensors"
 VIDEO_VAE = "minimax_h3_video_vae_fp16.safetensors"
 AUDIO_VAE = "minimax_h3_audio_vae_fp32.safetensors"
-
-VALID_SAMPLERS = {"res_multistep"}
-VALID_SCHEDULERS = {"simple", "normal", "beta"}
+VALID_SAMPLERS = {TURBO_SAMPLER}
+VALID_SCHEDULERS = {TURBO_SCHEDULER}
 VALID_REF_IMAGE_SIZES = {"match", "max"}
 
 
@@ -47,8 +54,10 @@ def validate_generation(
         raise ValueError(
             f"width * height must not exceed {MAX_PIXELS} pixels (480 * 864)"
         )
-    if not 1 <= steps <= 50:
-        raise ValueError("steps must be between 1 and 50")
+    if not TURBO_MIN_STEPS <= steps <= TURBO_MAX_STEPS:
+        raise ValueError(
+            f"steps must be between {TURBO_MIN_STEPS} and {TURBO_MAX_STEPS}"
+        )
     if sampler not in VALID_SAMPLERS:
         raise ValueError(f"sampler must be one of {sorted(VALID_SAMPLERS)}")
     if scheduler not in VALID_SCHEDULERS:
@@ -80,6 +89,15 @@ def _common_workflow(
             "class_type": "UNETLoader",
             "inputs": {"unet_name": diffusion_model, "weight_dtype": "default"},
         },
+        "turbo_lora": {
+            "class_type": "MiniMaxH3TurboLoRA",
+            "inputs": {
+                "model": ["model", 0],
+                "lora_name": TURBO_LORA,
+                "strength": TURBO_LORA_STRENGTH,
+                "low_vram": TURBO_LOW_VRAM,
+            },
+        },
         "clip": {
             "class_type": "CLIPLoader",
             "inputs": {
@@ -105,13 +123,13 @@ def _common_workflow(
             "inputs": {"noise_seed": seed},
         },
         "sampler": {
-            "class_type": "KSamplerSelect",
-            "inputs": {"sampler_name": sampler},
+            "class_type": "MiniMaxH3TurboSampler",
+            "inputs": {},
         },
         "scheduler": {
             "class_type": "BasicScheduler",
             "inputs": {
-                "model": ["model", 0],
+                "model": ["turbo_lora", 0],
                 "scheduler": scheduler,
                 "steps": steps,
                 "denoise": 1.0,
@@ -120,7 +138,7 @@ def _common_workflow(
         "guider": {
             "class_type": "BasicGuider",
             "inputs": {
-                "model": ["model", 0],
+                "model": ["turbo_lora", 0],
                 "conditioning": ["conditioning", 0],
             },
         },
@@ -170,9 +188,9 @@ def build_frames_workflow(
     height: int,
     duration_seconds: float,
     seed: int,
-    steps: int = 20,
-    sampler: str = "res_multistep",
-    scheduler: str = "simple",
+    steps: int = TURBO_STEPS,
+    sampler: str = TURBO_SAMPLER,
+    scheduler: str = TURBO_SCHEDULER,
     output_stem: str = "h3",
     first_frame_filename: str | None = None,
     last_frame_filename: str | None = None,
@@ -230,9 +248,9 @@ def build_reference_workflow(
     seed: int,
     references: list[dict],
     ref_image_size: str = "match",
-    steps: int = 20,
-    sampler: str = "res_multistep",
-    scheduler: str = "simple",
+    steps: int = TURBO_STEPS,
+    sampler: str = TURBO_SAMPLER,
+    scheduler: str = TURBO_SCHEDULER,
     output_stem: str = "h3",
 ) -> dict:
     validate_generation(

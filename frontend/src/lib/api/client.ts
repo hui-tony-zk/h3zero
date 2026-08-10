@@ -1,4 +1,5 @@
-import type { ComposerDraft, H3Specs } from "../../types";
+import type { ComposerDraft, FavoriteAsset, H3Specs, Job, MediaAsset } from "../../types";
+import { parseFavoriteSnapshot } from "../favorites";
 import { parseJobCreate, parseJobStatus, parseSpecs } from "./contracts";
 import { buildCreateJobRequest } from "./createJobRequest";
 
@@ -47,6 +48,34 @@ export async function getJobStatus(id: string) {
 
 export async function deleteJob(id: string) {
   await request(`/jobs/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export async function getFavorites(username: string) {
+  const response = await request(`/cloud-sync/${encodeURIComponent(username)}/favorites`, { headers: { Accept: "application/json" } });
+  return parseFavoriteSnapshot(await response.json());
+}
+
+export async function putFavorite(username: string, job: Job, assets: MediaAsset[], manifest: FavoriteAsset[]) {
+  const form = new FormData();
+  form.set("job", JSON.stringify(job));
+  form.set("assets", JSON.stringify(manifest));
+  assets.forEach((asset, index) => form.set(`asset_${index}`, asset.file, asset.name));
+  const response = await request(`/cloud-sync/${encodeURIComponent(username)}/favorites/${encodeURIComponent(job.id)}`, {
+    method: "PUT",
+    headers: { Accept: "application/json" },
+    body: form,
+  });
+  const [saved] = parseFavoriteSnapshot({ jobs: [await response.json()] });
+  if (!saved) throw new Error("The favorite response was invalid.");
+  return saved;
+}
+
+export async function deleteFavorite(username: string, id: string) {
+  await request(`/cloud-sync/${encodeURIComponent(username)}/favorites/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export async function getFavoriteAsset(username: string, id: string) {
+  return (await request(`/cloud-sync/${encodeURIComponent(username)}/assets/${encodeURIComponent(id)}`)).blob();
 }
 
 export function contentUrl(id: string) {

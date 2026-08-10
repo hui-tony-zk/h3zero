@@ -1,13 +1,30 @@
 import type { ComposerDraft, Job, JobCreateResponse } from "../types";
 
-export function isActiveJob(job: Job) { return job.status === "queued" || job.status === "running"; }
+export type JobBatch = { id: string; jobs: Job[]; active: boolean; createdAt: number };
+type PendingBatch = { id: string; index: number; size: number; createdAt: number };
 
-export function sortJobs(jobs: Job[]) {
-  return [...jobs].sort((left, right) => Number(isActiveJob(right)) - Number(isActiveJob(left)) || right.createdAt - left.createdAt);
+export function isActiveJob(job: Job) { return job.status === "uploading" || job.status === "queued" || job.status === "running"; }
+
+export function groupJobs(jobs: Job[]): JobBatch[] {
+  const grouped = new Map<string, Job[]>();
+  for (const job of jobs) {
+    const id = job.batchId ?? `job:${job.id}`;
+    grouped.set(id, [...(grouped.get(id) ?? []), job]);
+  }
+  return [...grouped.entries()].map(([id, members]) => ({
+    id,
+    jobs: members.sort((left, right) => (left.batchIndex ?? 0) - (right.batchIndex ?? 0) || left.createdAt - right.createdAt),
+    active: members.some(isActiveJob),
+    createdAt: Math.max(...members.map((job) => job.createdAt)),
+  })).sort((left, right) => Number(right.active) - Number(left.active) || right.createdAt - left.createdAt);
 }
 
-export function pendingJob(response: JobCreateResponse, draft: ComposerDraft): Job {
-  const now = Date.now();
+export function sortJobs(jobs: Job[]) {
+  return groupJobs(jobs).flatMap((batch) => batch.jobs);
+}
+
+export function pendingJob(response: JobCreateResponse, draft: ComposerDraft, batch?: PendingBatch): Job {
+  const now = batch?.createdAt ?? Date.now();
   const frames = draft.mode === "frames" ? [draft.firstFrame, draft.lastFrame].filter((asset) => asset !== null) : [];
   const source = [...frames].sort((left, right) => left.createdAt - right.createdAt)[0];
   const inputAssetIds = draft.mode === "references" ? draft.references.map((asset) => asset.id) : frames.map((asset) => asset.id);
@@ -20,6 +37,15 @@ export function pendingJob(response: JobCreateResponse, draft: ComposerDraft): J
     lastFrameId: draft.mode === "frames" ? draft.lastFrame?.id : undefined,
     referenceIds: draft.mode === "references" ? inputAssetIds : undefined,
     contentUrl: "",
-    progress: { phase: "queued", message: "Waiting for a worker", updatedAt: now },
+    progress: response.status === "uploading"
+      ? { phase: "uploading", message: "Uploading inputs", updatedAt: now }
+      : { phase: "queued", message: "Waiting for a worker", updatedAt: now },
+    batchId: batch?.id,
+    batchIndex: batch?.index,
+    batchSize: batch?.size,
   };
+}
+
+export function uploadingJob(id: string, draft: ComposerDraft, batch: PendingBatch): Job {
+  return pendingJob({ id, status: "uploading" }, draft, batch);
 }

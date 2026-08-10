@@ -1,6 +1,6 @@
 import { join } from "node:path";
 
-import { deployApp, downloadModels } from "./deploy/app.mjs";
+import { deployGpuApp, deployWebApp, downloadModels } from "./deploy/app.mjs";
 import {
   ensureProjectPython,
   modalEnvironment,
@@ -14,7 +14,8 @@ const [command, ...forwardedArgs] = process.argv.slice(2);
 async function setup() {
   const python = await prepareModal();
   await downloadModels(python);
-  await deployApp(python);
+  await deployGpuApp(python);
+  await deployWebApp(python);
   console.log("");
   console.log("Setup complete. Run `npm run smoke` to generate a test video.");
 }
@@ -30,7 +31,12 @@ async function models() {
 
 async function deploy() {
   const python = await prepareModal();
-  await deployApp(python);
+  await deployWebApp(python);
+}
+
+async function deployGpu() {
+  const python = await prepareModal();
+  await deployGpuApp(python);
 }
 
 async function generate(args) {
@@ -89,6 +95,9 @@ switch (command) {
   case "deploy":
     await deploy();
     break;
+  case "deploy-gpu":
+    await deployGpu();
+    break;
   case "smoke":
     await smoke(forwardedArgs);
     break;
@@ -100,6 +109,6 @@ switch (command) {
     break;
   default:
     throw new Error(
-      "Use one of: setup, modal-setup, models, deploy, generate, smoke, test",
+      "Use one of: setup, modal-setup, models, deploy, deploy-gpu, generate, smoke, test",
     );
 }

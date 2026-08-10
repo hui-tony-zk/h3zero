@@ -8,14 +8,17 @@ the source of truth for agents and contributors working in the repository. Read
 
 ## Project overview
 
-This repository exposes MiniMax H3 FL2VA through one Modal app in
-`modal_services/h3.py`. It contains the model downloader, `H3Service.generate`,
-a CPU-only ASGI gateway, and a local entrypoint. The gateway serves the compiled
-Vite app and durable asynchronous jobs from `minimax-h3-outputs`.
+This repository exposes MiniMax H3 FL2VA through two independently deployed
+Modal apps. `modal_services/h3_gpu.py` owns the model downloader and
+`H3Service.generate`; `modal_services/h3.py` owns the CPU-only ASGI gateway and
+local entrypoint. The gateway serves the compiled Vite app and durable
+asynchronous jobs from `minimax-h3-outputs`, and looks up the deployed GPU class
+from the `minimax-h3-gpu` app.
 
 Important paths:
 
-- `modal_services/h3.py`: Modal images, functions, GPU service, and entrypoint.
+- `modal_services/h3_gpu.py`: model image, downloader, and GPU service.
+- `modal_services/h3.py`: CPU web image, public gateway, and local entrypoint.
 - `modal_services/gateway.py`: public ASGI application and HTTP routes.
 - `modal_services/jobs.py`: durable job and output storage.
 - `minimax_h3/`: workflow, runtime, media, progress, and ComfyUI integration.
@@ -36,8 +39,8 @@ npm run setup
 The root setup command owns the complete flow: it creates `.venv`, installs the
 pinned local Python tooling, launches `python -m modal setup` if no active Modal
 profile exists, creates the Volumes, downloads the pinned weights, installs and
-builds the frontend, deploys the app, rotates stale CPU web containers, and
-verifies the deployed frontend bundle.
+builds the frontend, deploys the GPU app followed by the web app, rotates stale
+CPU web containers, and verifies the deployed frontend bundle.
 
 When acting on behalf of a user:
 
@@ -64,7 +67,8 @@ Keep user-facing workflows behind these root commands:
 | `npm run setup` | First setup, model download, frontend build, and deployment |
 | `npm run modal-setup` | Modal authentication and Volume preparation only |
 | `npm run models` | Download or validate the pinned model weights |
-| `npm run deploy` | Build, deploy, rotate stale web containers, and verify assets |
+| `npm run deploy` | Build and deploy only the web app, rotate it, and verify assets |
+| `npm run deploy:gpu` | Deploy the GPU worker after intentional worker changes |
 | `npm run smoke` | Submit the built-in paid test generation |
 | `npm run generate -- ...` | Generate a video through the Modal entrypoint |
 | `npm run frontend:dev` | Run Vite locally against `H3_MODAL_URL` |
@@ -106,9 +110,11 @@ Run `npm run frontend:build` after frontend changes when a focused frontend
 check is useful. A real smoke generation incurs GPU cost and requires explicit
 user intent.
 
-Deployment verifies the expected hashed frontend bundle on three consecutive
-requests. Do not weaken this check or replace graceful web-container rotation
-with broad app/container termination.
+Web deployment verifies the expected hashed frontend bundle on three
+consecutive requests. It must not redeploy `minimax-h3-gpu`, because doing so
+versions `H3Service` and can invalidate its CPU memory snapshots. Do not weaken
+the frontend check or replace graceful web-container rotation with broad
+app/container termination.
 
 ## Guardrails
 
@@ -123,4 +129,5 @@ with broad app/container termination.
 - Keep health, polling, static serving, and video downloads CPU-only; only job
   submission may spawn `H3Service.generate`.
 - Preserve durable asynchronous jobs in `minimax-h3-outputs`.
-- Preserve GPU workers during web-only deployment rotation.
+- Keep the GPU and web apps on independent deployment lifecycles.
+- Preserve GPU workers during web-only deployment and rotation.

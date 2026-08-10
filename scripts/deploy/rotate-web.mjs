@@ -98,7 +98,7 @@ export async function rotateWebContainers(
       if (remaining.some((candidate) => candidate.container_id === id)) throw error;
     }
   }
-  console.log(`Web container rotation complete (${stopped} stopped; GPU containers preserved).`);
+  console.log(`Web container rotation complete (${stopped} stopped; GPU app untouched).`);
   return stopped;
 }
 

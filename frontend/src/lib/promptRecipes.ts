@@ -2,7 +2,7 @@ import type { JSONContent } from "@tiptap/core";
 import type { MediaAsset } from "../types";
 import { REFERENCE_MENTION_NODE } from "./promptDocument";
 
-export type ReferenceRecipe = "reference" | "subject" | "storyboard" | "anchor" | "video-source" | "video-continuation" | "video-structure";
+export type ReferenceRecipe = "reference" | "as-is" | "subject" | "storyboard" | "anchor" | "video-source" | "video-continuation" | "video-structure";
 export type AnchorKind = "first frame" | "keyframe" | "last frame" | "composition anchor";
 
 type RecipeInput = {
@@ -28,6 +28,7 @@ function mention(asset: MediaAsset, token: string): JSONContent {
 
 export function buildReferenceInsertion({ asset, token, recipe, anchor = "composition anchor", promptText }: RecipeInput): JSONContent[] {
   const reference = mention(asset, token);
+  if (recipe === "as-is") return [reference];
   if (recipe === "reference") return [reference, { type: "text", text: " " }];
 
   if (recipe === "subject") {

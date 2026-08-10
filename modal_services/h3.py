@@ -51,12 +51,10 @@ app = modal.App(WEB_APP_NAME)
 
 @app.function(
     image=web_image,
-    cpu=2,
-    memory=4096,
     volumes={jobs.OUTPUT_ROOT: output_volume},
     timeout=15 * 60,
-    scaledown_window=30,
-    max_containers=2,
+    scaledown_window=2,
+    max_containers=1,
 )
 @modal.asgi_app()
 def web():

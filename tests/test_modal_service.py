@@ -66,6 +66,8 @@ class ModalServiceDefinitionTests(unittest.TestCase):
         keywords = {keyword.arg: keyword.value for keyword in cls_decorator.keywords}
         self.assertIsInstance(keywords["enable_memory_snapshot"], ast.Constant)
         self.assertTrue(keywords["enable_memory_snapshot"].value)
+        self.assertNotIn("cpu", keywords)
+        self.assertNotIn("memory", keywords)
         self.assertNotIn("experimental_options", keywords)
 
         enter_hooks = {}
@@ -90,6 +92,28 @@ class ModalServiceDefinitionTests(unittest.TestCase):
             enter_hooks,
             {"prepare_snapshot": True, "boot": False},
         )
+
+    def test_web_uses_minimum_resources_and_one_container(self):
+        source = Path("modal_services/h3.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        web = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "web"
+        )
+        function_decorator = next(
+            decorator
+            for decorator in web.decorator_list
+            if isinstance(decorator, ast.Call)
+            and isinstance(decorator.func, ast.Attribute)
+            and decorator.func.attr == "function"
+        )
+        keywords = {keyword.arg: keyword.value for keyword in function_decorator.keywords}
+
+        self.assertNotIn("cpu", keywords)
+        self.assertNotIn("memory", keywords)
+        self.assertEqual(keywords["max_containers"].value, 1)
+        self.assertEqual(keywords["scaledown_window"].value, 2)
 
 
 if __name__ == "__main__":

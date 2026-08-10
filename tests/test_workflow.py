@@ -176,6 +176,24 @@ class WorkflowTests(unittest.TestCase):
                 sampler="res_multistep",
             )
 
+    def test_builds_base_sampling_graph_when_turbo_is_disabled(self):
+        workflow = build_frames_workflow(
+            prompt="A lighthouse in a storm.",
+            width=864,
+            height=480,
+            duration_seconds=5,
+            seed=42,
+            turbo=False,
+        )
+        self.assertNotIn("turbo_lora", workflow)
+        self.assertEqual(workflow["sampler"], {
+            "class_type": "KSamplerSelect",
+            "inputs": {"sampler_name": "res_multistep"},
+        })
+        self.assertEqual(workflow["scheduler"]["inputs"]["steps"], 20)
+        self.assertEqual(workflow["scheduler"]["inputs"]["model"], ["model", 0])
+        self.assertEqual(workflow["guider"]["inputs"]["model"], ["model", 0])
+
 
 if __name__ == "__main__":
     unittest.main()

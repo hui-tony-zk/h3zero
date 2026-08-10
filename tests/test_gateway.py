@@ -203,6 +203,7 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(payload["first_frame"][:8], b"\x89PNG\r\n\x1a\n")
         self.assertEqual((payload["width"], payload["height"]), (480, 480))
         self.assertEqual(payload["geometry_source"], "first_frame")
+        self.assertTrue(payload["turbo"])
         self.assertEqual(payload["steps"], 8)
         self.assertEqual(payload["sampler"], "minimax_h3_turbo")
         self.assertEqual(payload["scheduler"], "simple")
@@ -404,6 +405,13 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
         with self.assertRaisesRegex(ValueError, "width must be an integer"):
             parse_config("test", '{"width": true}')
+        base = parse_config("test", '{"turbo": false}')
+        self.assertEqual(
+            (base["steps"], base["sampler"], base["scheduler"]),
+            (20, "res_multistep", "simple"),
+        )
+        with self.assertRaisesRegex(ValueError, "turbo must be a boolean"):
+            parse_config("test", '{"turbo": "no"}')
         response = self.client.post(
             "/api/jobs",
             data={"prompt": "test", "width": "512"},

@@ -47,7 +47,9 @@ export async function getJobStatus(id: string) {
 }
 
 export async function deleteJob(id: string) {
-  await request(`/jobs/${encodeURIComponent(id)}`, { method: "DELETE" });
+  const response = await fetch(`${API_BASE}/jobs/${encodeURIComponent(id)}`, { method: "DELETE" });
+  if (response.status === 404) return;
+  if (!response.ok) throw new ApiError(await parseError(response), response.status);
 }
 
 export async function getFavorites(username: string) {

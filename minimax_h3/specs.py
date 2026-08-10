@@ -9,7 +9,12 @@ FPS = 24
 CANVAS_MULTIPLE = 32
 BASE_SHORT_EDGE = 480
 MAX_PIXELS = 480 * 864
-SPEC_VERSION = "1.1"
+SPEC_VERSION = "1.2"
+BASE_MIN_STEPS = 1
+BASE_STEPS = 20
+BASE_MAX_STEPS = 50
+BASE_SAMPLER = "res_multistep"
+BASE_SCHEDULER = "simple"
 TURBO_LORA = "minimax_h3_turbo_v4_step600_ema.safetensors"
 TURBO_LORA_STRENGTH = 1.0
 TURBO_LOW_VRAM = False
@@ -172,18 +177,37 @@ _SPECS = {
     "output": {
         "fps": FPS,
         "sampling": {
-            "method": "MiniMax-H3 Turbo LoRA",
-            "lora": TURBO_LORA,
-            "preview": True,
-            "steps": {
-                "default": TURBO_STEPS,
-                "min": TURBO_MIN_STEPS,
-                "max": TURBO_MAX_STEPS,
+            "default": "turbo",
+            "profiles": {
+                "turbo": {
+                    "method": "MiniMax-H3 Turbo LoRA",
+                    "lora": TURBO_LORA,
+                    "preview": True,
+                    "steps": {
+                        "default": TURBO_STEPS,
+                        "min": TURBO_MIN_STEPS,
+                        "max": TURBO_MAX_STEPS,
+                    },
+                    "sampler": TURBO_SAMPLER,
+                    "scheduler": TURBO_SCHEDULER,
+                    "lora_strength": TURBO_LORA_STRENGTH,
+                    "low_vram": TURBO_LOW_VRAM,
+                },
+                "base": {
+                    "method": "MiniMax-H3 Base",
+                    "lora": None,
+                    "preview": False,
+                    "steps": {
+                        "default": BASE_STEPS,
+                        "min": BASE_MIN_STEPS,
+                        "max": BASE_MAX_STEPS,
+                    },
+                    "sampler": BASE_SAMPLER,
+                    "scheduler": BASE_SCHEDULER,
+                    "lora_strength": None,
+                    "low_vram": None,
+                },
             },
-            "sampler": TURBO_SAMPLER,
-            "scheduler": TURBO_SCHEDULER,
-            "lora_strength": TURBO_LORA_STRENGTH,
-            "low_vram": TURBO_LOW_VRAM,
         },
         "audio": {
             "native": True,

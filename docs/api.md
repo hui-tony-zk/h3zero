@@ -45,6 +45,10 @@ deployed H3Zero and `npm run generate` do not use it.
 `prompt` is required. `config` is a JSON string. First and last frames accept
 PNG, JPEG, or WebP files up to 20 MiB.
 
+Turbo is enabled by default. Set `"turbo":false` to use the base 20-step
+`res_multistep` workflow. When sampling fields are omitted, the API selects the
+matching profile defaults (Turbo: 8 steps; base: 20 steps).
+
 ```bash
 curl -X POST "$H3_MODAL_URL/api/jobs" \
   -F 'prompt=A paper dragon wakes. Audio: paper rustling.' \
@@ -104,8 +108,8 @@ Progress phases are `queued`, `starting`, `loading`, `conditioning`, `sampling`,
 sampling phase.
 
 A completed result includes dimensions, frames, actual duration, FPS, audio
-metadata, seed, Turbo LoRA and sampler details, assigned reference tags, and
-`video_url`.
+metadata, seed, the selected Turbo/base sampling details, assigned reference
+tags, and `video_url`. LoRA fields are present only for Turbo generations.
 
 ## Local development
 

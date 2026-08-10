@@ -37,15 +37,17 @@ export function buildCreateJobRequest(draft: ComposerDraft, specs: H3Specs) {
     field: `attachment_${index}`,
   })) : [];
   const body = new FormData();
+  const sampling = specs.output.sampling.profiles[draft.turbo ? "turbo" : "base"];
   body.set("prompt", draft.prompt.trim());
   body.set("config", JSON.stringify({
     mode: draft.mode,
     width: frame?.width ?? preset.width,
     height: frame?.height ?? preset.height,
     duration_seconds: draft.duration,
-    steps: specs.output.sampling.steps.default,
-    sampler: specs.output.sampling.sampler,
-    scheduler: specs.output.sampling.scheduler,
+    turbo: draft.turbo,
+    steps: sampling.steps.default,
+    sampler: sampling.sampler,
+    scheduler: sampling.scheduler,
     geometry_source: frame?.geometrySource,
     references: draft.mode === "references" ? references : undefined,
   }));

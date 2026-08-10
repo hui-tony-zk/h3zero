@@ -85,13 +85,15 @@ test("GitHub star reminders appear at 2, 5, 10, and every ten completions", () =
 
 test("pending reference jobs retain remix asset IDs", () => {
   const references = [asset("new"), asset("old")];
-  const job = pendingJob({ id: "job", status: "queued" }, { mode: "references", prompt: "scene", promptDocument: emptyPromptDocument(), duration: 10, aspect: "16:9", generationCount: 1, references });
+  const job = pendingJob({ id: "job", status: "queued" }, { mode: "references", prompt: "scene", promptDocument: emptyPromptDocument(), duration: 10, aspect: "16:9", generationCount: 1, turbo: false, references });
   assert.deepEqual(job.referenceIds, ["new", "old"]);
+  assert.equal(job.turbo, false);
 });
 
 test("new drafts default to two generations", () => {
   assert.equal(emptyFramesDraft().generationCount, 2);
   assert.equal(emptyReferencesDraft().generationCount, 2);
+  assert.equal(emptyFramesDraft().turbo, true);
 });
 
 test("optimistic jobs start in the upload phase and retain batch position", () => {
@@ -103,7 +105,7 @@ test("optimistic jobs start in the upload phase and retain batch position", () =
 });
 
 test("repeat generations stay together and retain their batch order", () => {
-  const draft = { mode: "references", prompt: "scene", promptDocument: emptyPromptDocument(), duration: 5, aspect: "16:9", generationCount: 2, references: [asset("hero")] } as const;
+  const draft = { mode: "references", prompt: "scene", promptDocument: emptyPromptDocument(), duration: 5, aspect: "16:9", generationCount: 2, turbo: true, references: [asset("hero")] } as const;
   const first = { ...pendingJob({ id: "first", status: "queued" }, draft, { id: "batch", index: 0, size: 2, createdAt: 20 }), status: "completed" as const };
   const second = { ...pendingJob({ id: "second", status: "queued" }, draft, { id: "batch", index: 1, size: 2, createdAt: 20 }), status: "running" as const };
   const older = { ...first, id: "older", batchId: undefined, batchIndex: undefined, batchSize: undefined, createdAt: 10, status: "queued" as const };

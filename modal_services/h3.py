@@ -17,6 +17,9 @@ from minimax_h3.config import (
     WEB_APP_NAME,
 )
 from minimax_h3.workflow import (
+    BASE_SAMPLER,
+    BASE_SCHEDULER,
+    BASE_STEPS,
     TURBO_SAMPLER,
     TURBO_SCHEDULER,
     TURBO_STEPS,
@@ -88,9 +91,10 @@ def main(
     height: int = 480,
     duration_seconds: float = 5,
     seed: int = -1,
-    steps: int = TURBO_STEPS,
-    sampler: str = TURBO_SAMPLER,
-    scheduler: str = TURBO_SCHEDULER,
+    turbo: bool = True,
+    steps: int = 0,
+    sampler: str = "",
+    scheduler: str = "",
     first_frame: str = "",
     last_frame: str = "",
 ) -> None:
@@ -102,9 +106,10 @@ def main(
         height=height,
         duration_seconds=duration_seconds,
         seed=None if seed < 0 else seed,
-        steps=steps,
-        sampler=sampler,
-        scheduler=scheduler,
+        turbo=turbo,
+        steps=steps or (TURBO_STEPS if turbo else BASE_STEPS),
+        sampler=sampler or (TURBO_SAMPLER if turbo else BASE_SAMPLER),
+        scheduler=scheduler or (TURBO_SCHEDULER if turbo else BASE_SCHEDULER),
         first_frame=_read_keyframe(first_frame, "first"),
         last_frame=_read_keyframe(last_frame, "last"),
     )

@@ -31,6 +31,7 @@ export function pendingJob(response: JobCreateResponse, draft: ComposerDraft, ba
   return {
     id: response.id, mode: draft.mode, prompt: draft.prompt.trim(), createdAt: now, updatedAt: now,
     status: response.status, duration: draft.duration, aspect: draft.aspect,
+    turbo: draft.turbo,
     displayAspect: source?.width && source.height ? source.width / source.height : undefined,
     inputAssetIds,
     firstFrameId: draft.mode === "frames" ? draft.firstFrame?.id : undefined,

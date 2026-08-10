@@ -12,6 +12,7 @@ type StoredDraft = {
   duration?: number;
   aspect?: AspectId;
   generationCount?: GenerationCount;
+  turbo?: boolean;
   firstFrameId?: string | null;
   lastFrameId?: string | null;
   referenceIds?: string[];
@@ -20,11 +21,11 @@ type StoredDraft = {
 type StoredDrafts = { activeMode?: GenerationMode; frames?: StoredDraft; references?: StoredDraft; generationDefaultVersion?: number };
 
 export function emptyFramesDraft(): FramesDraft {
-  return { mode: "frames", prompt: "", promptDocument: emptyPromptDocument(), duration: 5, aspect: "16:9", generationCount: 2, firstFrame: null, lastFrame: null };
+  return { mode: "frames", prompt: "", promptDocument: emptyPromptDocument(), duration: 5, aspect: "16:9", generationCount: 2, turbo: true, firstFrame: null, lastFrame: null };
 }
 
 export function emptyReferencesDraft(): ReferencesDraft {
-  return { mode: "references", prompt: "", promptDocument: emptyPromptDocument(), duration: 5, aspect: "16:9", generationCount: 2, references: [] };
+  return { mode: "references", prompt: "", promptDocument: emptyPromptDocument(), duration: 5, aspect: "16:9", generationCount: 2, turbo: true, references: [] };
 }
 
 function aspect(value?: AspectId): AspectId {
@@ -42,13 +43,13 @@ async function restoreFrames(stored?: StoredDraft, useNewDefault = false): Promi
     stored.firstFrameId ? loadAsset(stored.firstFrameId) : null,
     stored.lastFrameId ? loadAsset(stored.lastFrameId) : null,
   ]);
-  return { mode: "frames", prompt: "", promptDocument: emptyPromptDocument(), duration: stored.duration ?? 5, aspect: aspect(stored.aspect), generationCount: generationCount(stored.generationCount, useNewDefault), firstFrame, lastFrame };
+  return { mode: "frames", prompt: "", promptDocument: emptyPromptDocument(), duration: stored.duration ?? 5, aspect: aspect(stored.aspect), generationCount: generationCount(stored.generationCount, useNewDefault), turbo: stored.turbo !== false, firstFrame, lastFrame };
 }
 
 async function restoreReferences(stored?: StoredDraft, useNewDefault = false): Promise<ReferencesDraft> {
   if (!stored) return emptyReferencesDraft();
   const references = (await Promise.all((stored.referenceIds ?? []).map(loadAsset))).filter((asset): asset is MediaAsset => asset !== null);
-  return { mode: "references", prompt: "", promptDocument: emptyPromptDocument(), duration: stored.duration ?? 5, aspect: aspect(stored.aspect), generationCount: generationCount(stored.generationCount, useNewDefault), references };
+  return { mode: "references", prompt: "", promptDocument: emptyPromptDocument(), duration: stored.duration ?? 5, aspect: aspect(stored.aspect), generationCount: generationCount(stored.generationCount, useNewDefault), turbo: stored.turbo !== false, references };
 }
 
 export async function readDrafts(): Promise<{ activeMode: GenerationMode; drafts: DraftCollection }> {
@@ -60,7 +61,7 @@ export async function readDrafts(): Promise<{ activeMode: GenerationMode; drafts
 }
 
 function base(draft: FramesDraft | ReferencesDraft): StoredDraft {
-  return { duration: draft.duration, aspect: draft.aspect, generationCount: draft.generationCount };
+  return { duration: draft.duration, aspect: draft.aspect, generationCount: draft.generationCount, turbo: draft.turbo };
 }
 
 export function writeDrafts(activeMode: GenerationMode, drafts: DraftCollection) {

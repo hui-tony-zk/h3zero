@@ -1,4 +1,4 @@
-"""Pure validation and ComfyUI workflow construction for MiniMax H3 Turbo."""
+"""Pure validation and ComfyUI workflow construction for MiniMax H3."""
 
 from __future__ import annotations
 
@@ -6,6 +6,11 @@ import json
 
 from minimax_h3.media import image_dimensions, image_suffix
 from minimax_h3.specs import (
+    BASE_MAX_STEPS,
+    BASE_MIN_STEPS,
+    BASE_SAMPLER,
+    BASE_SCHEDULER,
+    BASE_STEPS,
     FPS,
     MAX_IMAGE_BYTES,
     MAX_PIXELS,
@@ -25,8 +30,6 @@ REFERENCE_DIFFUSION_MODEL = "minimax_h3_ref2va_int8_convrot.safetensors"
 TEXT_ENCODER = "qwen3vl_32b_minimax_h3_int8_convrot.safetensors"
 VIDEO_VAE = "minimax_h3_video_vae_fp16.safetensors"
 AUDIO_VAE = "minimax_h3_audio_vae_fp32.safetensors"
-VALID_SAMPLERS = {TURBO_SAMPLER}
-VALID_SCHEDULERS = {TURBO_SCHEDULER}
 VALID_REF_IMAGE_SIZES = {"match", "max"}
 
 
@@ -39,7 +42,10 @@ def validate_generation(
     steps: int,
     sampler: str,
     scheduler: str,
+    turbo: bool = True,
 ) -> None:
+    if not isinstance(turbo, bool):
+        raise ValueError("turbo must be a boolean")
     if not prompt.strip():
         raise ValueError("prompt must not be blank")
     if len(prompt) > 12_000:
@@ -54,14 +60,18 @@ def validate_generation(
         raise ValueError(
             f"width * height must not exceed {MAX_PIXELS} pixels (480 * 864)"
         )
-    if not TURBO_MIN_STEPS <= steps <= TURBO_MAX_STEPS:
+    min_steps = TURBO_MIN_STEPS if turbo else BASE_MIN_STEPS
+    max_steps = TURBO_MAX_STEPS if turbo else BASE_MAX_STEPS
+    valid_sampler = TURBO_SAMPLER if turbo else BASE_SAMPLER
+    valid_scheduler = TURBO_SCHEDULER if turbo else BASE_SCHEDULER
+    if not min_steps <= steps <= max_steps:
         raise ValueError(
-            f"steps must be between {TURBO_MIN_STEPS} and {TURBO_MAX_STEPS}"
+            f"steps must be between {min_steps} and {max_steps}"
         )
-    if sampler not in VALID_SAMPLERS:
-        raise ValueError(f"sampler must be one of {sorted(VALID_SAMPLERS)}")
-    if scheduler not in VALID_SCHEDULERS:
-        raise ValueError(f"scheduler must be one of {sorted(VALID_SCHEDULERS)}")
+    if sampler != valid_sampler:
+        raise ValueError(f"sampler must be {valid_sampler!r} when turbo is {turbo}")
+    if scheduler != valid_scheduler:
+        raise ValueError(f"scheduler must be {valid_scheduler!r} when turbo is {turbo}")
 
 
 def validate_image_bytes(raw: bytes) -> str:
@@ -83,20 +93,13 @@ def _common_workflow(
     sampler: str,
     scheduler: str,
     output_stem: str,
+    turbo: bool,
 ) -> dict:
-    return {
+    model_reference = ["turbo_lora", 0] if turbo else ["model", 0]
+    workflow = {
         "model": {
             "class_type": "UNETLoader",
             "inputs": {"unet_name": diffusion_model, "weight_dtype": "default"},
-        },
-        "turbo_lora": {
-            "class_type": "MiniMaxH3TurboLoRA",
-            "inputs": {
-                "model": ["model", 0],
-                "lora_name": TURBO_LORA,
-                "strength": TURBO_LORA_STRENGTH,
-                "low_vram": TURBO_LOW_VRAM,
-            },
         },
         "clip": {
             "class_type": "CLIPLoader",
@@ -123,13 +126,13 @@ def _common_workflow(
             "inputs": {"noise_seed": seed},
         },
         "sampler": {
-            "class_type": "MiniMaxH3TurboSampler",
-            "inputs": {},
+            "class_type": "MiniMaxH3TurboSampler" if turbo else "KSamplerSelect",
+            "inputs": {} if turbo else {"sampler_name": sampler},
         },
         "scheduler": {
             "class_type": "BasicScheduler",
             "inputs": {
-                "model": ["turbo_lora", 0],
+                "model": model_reference,
                 "scheduler": scheduler,
                 "steps": steps,
                 "denoise": 1.0,
@@ -138,7 +141,7 @@ def _common_workflow(
         "guider": {
             "class_type": "BasicGuider",
             "inputs": {
-                "model": ["turbo_lora", 0],
+                "model": model_reference,
                 "conditioning": ["conditioning", 0],
             },
         },
@@ -179,6 +182,17 @@ def _common_workflow(
             },
         },
     }
+    if turbo:
+        workflow["turbo_lora"] = {
+            "class_type": "MiniMaxH3TurboLoRA",
+            "inputs": {
+                "model": ["model", 0],
+                "lora_name": TURBO_LORA,
+                "strength": TURBO_LORA_STRENGTH,
+                "low_vram": TURBO_LOW_VRAM,
+            },
+        }
+    return workflow
 
 
 def build_frames_workflow(
@@ -188,13 +202,17 @@ def build_frames_workflow(
     height: int,
     duration_seconds: float,
     seed: int,
-    steps: int = TURBO_STEPS,
-    sampler: str = TURBO_SAMPLER,
-    scheduler: str = TURBO_SCHEDULER,
+    turbo: bool = True,
+    steps: int | None = None,
+    sampler: str | None = None,
+    scheduler: str | None = None,
     output_stem: str = "h3",
     first_frame_filename: str | None = None,
     last_frame_filename: str | None = None,
 ) -> dict:
+    steps = steps if steps is not None else (TURBO_STEPS if turbo else BASE_STEPS)
+    sampler = sampler or (TURBO_SAMPLER if turbo else BASE_SAMPLER)
+    scheduler = scheduler or (TURBO_SCHEDULER if turbo else BASE_SCHEDULER)
     validate_generation(
         prompt=prompt,
         width=width,
@@ -203,6 +221,7 @@ def build_frames_workflow(
         steps=steps,
         sampler=sampler,
         scheduler=scheduler,
+        turbo=turbo,
     )
     if not 0 <= seed <= 0xFFFFFFFFFFFFFFFF:
         raise ValueError("seed must be an unsigned 64-bit integer")
@@ -223,6 +242,7 @@ def build_frames_workflow(
         sampler=sampler,
         scheduler=scheduler,
         output_stem=output_stem,
+        turbo=turbo,
     )
     for label, filename in (
         ("first_frame", first_frame_filename),
@@ -247,12 +267,16 @@ def build_reference_workflow(
     duration_seconds: float,
     seed: int,
     references: list[dict],
+    turbo: bool = True,
     ref_image_size: str = "match",
-    steps: int = TURBO_STEPS,
-    sampler: str = TURBO_SAMPLER,
-    scheduler: str = TURBO_SCHEDULER,
+    steps: int | None = None,
+    sampler: str | None = None,
+    scheduler: str | None = None,
     output_stem: str = "h3",
 ) -> dict:
+    steps = steps if steps is not None else (TURBO_STEPS if turbo else BASE_STEPS)
+    sampler = sampler or (TURBO_SAMPLER if turbo else BASE_SAMPLER)
+    scheduler = scheduler or (TURBO_SCHEDULER if turbo else BASE_SCHEDULER)
     validate_generation(
         prompt=prompt,
         width=width,
@@ -261,6 +285,7 @@ def build_reference_workflow(
         steps=steps,
         sampler=sampler,
         scheduler=scheduler,
+        turbo=turbo,
     )
     if not 0 <= seed <= 0xFFFFFFFFFFFFFFFF:
         raise ValueError("seed must be an unsigned 64-bit integer")
@@ -287,6 +312,7 @@ def build_reference_workflow(
         sampler=sampler,
         scheduler=scheduler,
         output_stem=output_stem,
+        turbo=turbo,
     )
 
     for index, reference in enumerate(references):

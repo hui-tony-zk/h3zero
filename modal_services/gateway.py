@@ -19,6 +19,9 @@ from starlette.concurrency import run_in_threadpool
 from minimax_h3 import media
 from minimax_h3.specs import (
     AUDIO_MIME_TYPES,
+    BASE_SAMPLER,
+    BASE_SCHEDULER,
+    BASE_STEPS,
     IMAGE_MIME_TYPES,
     MAX_AUDIO_BYTES,
     MAX_IMAGE_BYTES,
@@ -30,17 +33,14 @@ from minimax_h3.specs import (
     MAX_VIDEO_BYTES,
     MIN_REFERENCE_DURATION,
     VIDEO_MIME_TYPES,
+    TURBO_SAMPLER,
+    TURBO_SCHEDULER,
+    TURBO_STEPS,
     aspect_presets,
     get_specs,
     native_canvas,
 )
-from minimax_h3.workflow import (
-    TURBO_SAMPLER,
-    TURBO_SCHEDULER,
-    TURBO_STEPS,
-    validate_generation,
-    validate_image_bytes,
-)
+from minimax_h3.workflow import validate_generation, validate_image_bytes
 from modal_services import favorites, jobs
 
 DEFAULT_CONFIG = {
@@ -49,6 +49,7 @@ DEFAULT_CONFIG = {
     "height": 480,
     "duration_seconds": 5,
     "seed": None,
+    "turbo": True,
     "steps": TURBO_STEPS,
     "sampler": TURBO_SAMPLER,
     "scheduler": TURBO_SCHEDULER,
@@ -96,6 +97,14 @@ def parse_config(prompt: str, raw: str | None) -> dict:
     config = {**DEFAULT_CONFIG, **supplied}
     if config["mode"] not in {"frames", "references"}:
         raise ValueError("mode must be 'frames' or 'references'")
+    if not isinstance(config["turbo"], bool):
+        raise ValueError("turbo must be a boolean")
+    if "steps" not in supplied:
+        config["steps"] = TURBO_STEPS if config["turbo"] else BASE_STEPS
+    if "sampler" not in supplied:
+        config["sampler"] = TURBO_SAMPLER if config["turbo"] else BASE_SAMPLER
+    if "scheduler" not in supplied:
+        config["scheduler"] = TURBO_SCHEDULER if config["turbo"] else BASE_SCHEDULER
     for field in ("width", "height", "steps"):
         if isinstance(config[field], bool) or not isinstance(config[field], int):
             raise ValueError(f"{field} must be an integer")
@@ -130,6 +139,7 @@ def parse_config(prompt: str, raw: str | None) -> dict:
                 "scheduler",
             )
         },
+        turbo=config["turbo"],
     )
     return config
 
@@ -418,6 +428,7 @@ def _resolve_frame_geometry(
                 "width", "height", "duration_seconds", "steps", "sampler", "scheduler"
             )
         },
+        turbo=resolved["turbo"],
     )
     return resolved
 
@@ -689,6 +700,7 @@ def create_gateway(
                 "prompt": request_data.get("prompt", ""),
                 "status": "completed",
                 "duration": request_data.get("duration_seconds", 5),
+                "turbo": request_data.get("turbo", True),
                 "contentUrl": f"/api/jobs/{job_id}/video",
                 "metadata": result_data,
                 "hearted": True,

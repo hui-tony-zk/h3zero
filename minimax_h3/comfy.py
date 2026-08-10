@@ -15,6 +15,7 @@ COMFY_DIR = "/root/comfy/ComfyUI"
 INPUT_ROOT = f"{COMFY_DIR}/input"
 OUTPUT_ROOT = f"{COMFY_DIR}/output"
 DEFAULT_PORT = 8188
+WEBSOCKET_TIMEOUT_SECONDS = 120
 
 
 def symlink_models(source: str = "/models", target: str = f"{COMFY_DIR}/models") -> None:
@@ -101,7 +102,8 @@ def submit_and_watch(
 
     client_id = uuid.uuid4().hex
     websocket = create_connection(
-        f"ws://127.0.0.1:{port}/ws?clientId={client_id}", timeout=60
+        f"ws://127.0.0.1:{port}/ws?clientId={client_id}",
+        timeout=WEBSOCKET_TIMEOUT_SECONDS,
     )
     try:
         payload = json.dumps(

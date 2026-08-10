@@ -6,7 +6,7 @@ from minimax_h3.specs import get_specs, native_canvas
 class SpecsTests(unittest.TestCase):
     def test_authoritative_capabilities_snapshot(self):
         specs = get_specs()
-        self.assertEqual(specs["version"], "1.1")
+        self.assertEqual(specs["version"], "1.2")
         self.assertTrue(specs["modes"]["references"]["available"])
         self.assertEqual(specs["modes"]["references"]["order"], "upload_order")
         attachments = specs["modes"]["references"]["attachments"]
@@ -16,12 +16,18 @@ class SpecsTests(unittest.TestCase):
         self.assertEqual(attachments["max_audios"], 3)
         self.assertTrue(attachments["audio_may_not_be_sole_modality"])
         sampling = specs["output"]["sampling"]
-        self.assertEqual(sampling["steps"], {"default": 8, "min": 4, "max": 8})
-        self.assertEqual(sampling["sampler"], "minimax_h3_turbo")
+        self.assertEqual(sampling["default"], "turbo")
+        turbo = sampling["profiles"]["turbo"]
+        base = sampling["profiles"]["base"]
+        self.assertEqual(turbo["steps"], {"default": 8, "min": 4, "max": 8})
+        self.assertEqual(turbo["sampler"], "minimax_h3_turbo")
         self.assertEqual(
-            sampling["lora"],
+            turbo["lora"],
             "minimax_h3_turbo_v4_step600_ema.safetensors",
         )
+        self.assertEqual(base["steps"], {"default": 20, "min": 1, "max": 50})
+        self.assertEqual(base["sampler"], "res_multistep")
+        self.assertIsNone(base["lora"])
 
     def test_native_aspects_and_duration_grid(self):
         specs = get_specs()

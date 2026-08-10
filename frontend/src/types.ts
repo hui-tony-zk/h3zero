@@ -26,6 +26,7 @@ export interface BaseDraft {
   duration: number;
   aspect: AspectId;
   generationCount: GenerationCount;
+  turbo: boolean;
 }
 
 export interface FramesDraft extends BaseDraft {
@@ -77,22 +78,27 @@ export interface ReferencesModeSpec {
   };
 }
 
+export interface SamplingProfile {
+  method: string;
+  lora: string | null;
+  preview: boolean;
+  steps: { default: number; min: number; max: number };
+  sampler: string;
+  scheduler: string;
+  lora_strength: number | null;
+  low_vram: boolean | null;
+}
+
 export interface H3Specs {
-  version: "1.1";
+  version: "1.2";
   modes: {
     frames: FramesModeSpec;
     references: ReferencesModeSpec;
   };
   output: {
     sampling: {
-      method: string;
-      lora: string;
-      preview: boolean;
-      steps: { default: number; min: number; max: number };
-      sampler: string;
-      scheduler: string;
-      lora_strength: number;
-      low_vram: boolean;
+      default: "turbo" | "base";
+      profiles: Record<"turbo" | "base", SamplingProfile>;
     };
     duration: {
       default_seconds: number;
@@ -120,6 +126,7 @@ export interface GenerationMetadata {
   steps?: number;
   sampler?: string;
   scheduler?: string;
+  turbo?: boolean;
   lora?: string;
   lora_strength?: number;
   lora_low_vram?: boolean;
@@ -154,6 +161,7 @@ export interface Job {
   status: JobStatus;
   duration: number;
   aspect: AspectId;
+  turbo: boolean;
   displayAspect?: number;
   inputAssetIds: string[];
   firstFrameId?: string;

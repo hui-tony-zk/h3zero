@@ -65,11 +65,11 @@ export function useDrafts() {
     if (job.mode === "references") {
       const references = (await Promise.all((job.referenceIds ?? job.inputAssetIds).map(restoreAsset))).filter((asset): asset is MediaAsset => asset !== null);
       const prompt = restoreReferenceTokens(job.prompt, references);
-      setDrafts((current) => ({ ...current, references: { ...current.references, prompt, promptDocument: promptTextToDocument(prompt, references), duration: job.duration, aspect: job.aspect, references } }));
+      setDrafts((current) => ({ ...current, references: { ...current.references, prompt, promptDocument: promptTextToDocument(prompt, references), duration: job.duration, aspect: job.aspect, turbo: job.turbo, references } }));
       return;
     }
     const [firstFrame, lastFrame] = await Promise.all([job.firstFrameId ? restoreAsset(job.firstFrameId) : null, job.lastFrameId ? restoreAsset(job.lastFrameId) : null]);
-    setDrafts((current) => ({ ...current, frames: { ...current.frames, prompt: job.prompt, promptDocument: promptTextToDocument(job.prompt), duration: job.duration, aspect: job.aspect, firstFrame, lastFrame } }));
+    setDrafts((current) => ({ ...current, frames: { ...current.frames, prompt: job.prompt, promptDocument: promptTextToDocument(job.prompt), duration: job.duration, aspect: job.aspect, turbo: job.turbo, firstFrame, lastFrame } }));
   }, []);
 
   const resetActiveDraft = useCallback(() => {

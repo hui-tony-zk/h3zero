@@ -357,9 +357,10 @@ class H3Service:
         height: int = 480,
         duration_seconds: float = 5,
         seed: int | None = None,
-        steps: int = TURBO_STEPS,
-        sampler: str = TURBO_SAMPLER,
-        scheduler: str = TURBO_SCHEDULER,
+        turbo: bool = True,
+        steps: int | None = None,
+        sampler: str | None = None,
+        scheduler: str | None = None,
         first_frame: bytes | None = None,
         last_frame: bytes | None = None,
         job_id: str | None = None,
@@ -382,6 +383,8 @@ class H3Service:
             jobs.validate_job_id(job_id)
         if mode not in {"frames", "references"}:
             raise ValueError("mode must be 'frames' or 'references'")
+        if not isinstance(turbo, bool):
+            raise ValueError("turbo must be a boolean")
         if geometry_source not in {None, "first_frame", "last_frame"}:
             raise ValueError("invalid geometry_source")
         if mode == "references" and (first_frame is not None or last_frame is not None):
@@ -418,6 +421,7 @@ class H3Service:
                     height=height,
                     duration_seconds=duration_seconds,
                     seed=actual_seed,
+                    turbo=turbo,
                     steps=steps,
                     sampler=sampler,
                     scheduler=scheduler,
@@ -432,6 +436,7 @@ class H3Service:
                     height=height,
                     duration_seconds=duration_seconds,
                     seed=actual_seed,
+                    turbo=turbo,
                     steps=steps,
                     sampler=sampler,
                     scheduler=scheduler,
@@ -451,6 +456,10 @@ class H3Service:
                 )
 
             frames = aligned_frame_count(duration_seconds)
+            sampling_steps = int(workflow["scheduler"]["inputs"]["steps"])
+            sampling_sampler = (
+                TURBO_SAMPLER if turbo else str(workflow["sampler"]["inputs"]["sampler_name"])
+            )
             metadata = {
                 "mode": mode,
                 "model": "MiniMax-H3-Ref2VA" if mode == "references" else "MiniMax-H3-FL2VA",
@@ -463,14 +472,18 @@ class H3Service:
                 "frames": frames,
                 "fps": 24,
                 "seed": actual_seed,
-                "steps": steps,
-                "sampler": sampler,
-                "scheduler": scheduler,
-                "lora": TURBO_LORA,
-                "lora_strength": TURBO_LORA_STRENGTH,
-                "lora_low_vram": TURBO_LOW_VRAM,
+                "turbo": turbo,
+                "steps": sampling_steps,
+                "sampler": sampling_sampler,
+                "scheduler": workflow["scheduler"]["inputs"]["scheduler"],
                 "audio": {"native": True, "sample_rate_hz": 32000, "channels": 2},
             }
+            if turbo:
+                metadata.update({
+                    "lora": TURBO_LORA,
+                    "lora_strength": TURBO_LORA_STRENGTH,
+                    "lora_low_vram": TURBO_LOW_VRAM,
+                })
             if mode == "references":
                 metadata["references"] = [
                     {

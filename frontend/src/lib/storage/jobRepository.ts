@@ -53,6 +53,7 @@ export function restoreJob(value: unknown): Job | null {
     createdAt, updatedAt: typeof source.updatedAt === "number" ? source.updatedAt : createdAt,
     duration: typeof source.duration === "number" ? source.duration : 5,
     aspect: aspect(source.aspect),
+    turbo: source.turbo !== false,
     displayAspect: typeof source.displayAspect === "number" ? source.displayAspect : undefined,
     inputAssetIds,
     firstFrameId: typeof source.firstFrameId === "string" ? source.firstFrameId : undefined,

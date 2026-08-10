@@ -11,8 +11,8 @@ from minimax_h3.runtime import (
 
 
 class RuntimeTests(unittest.TestCase):
-    def test_personal_use_gpu_scaledown_is_ten_seconds(self):
-        self.assertEqual(GPU_SCALEDOWN_WINDOW_SECONDS, 10)
+    def test_personal_use_gpu_scaledown_is_thirty_seconds(self):
+        self.assertEqual(GPU_SCALEDOWN_WINDOW_SECONDS, 30)
 
     def test_pins_blackwell_runtime_and_sage_attention(self):
         self.assertEqual(PYTORCH_VERSION, "2.11.0+cu130")

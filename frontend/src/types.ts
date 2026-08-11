@@ -3,6 +3,9 @@ import type { JSONContent } from "@tiptap/core";
 export type GenerationMode = "frames" | "references";
 export type AspectId = "9:16" | "16:9";
 export type GenerationCount = 1 | 2 | 3;
+export type SamplingProfileId = "turbo_4" | "turbo_8" | "spectrum" | "base";
+export type SeedChoice = "random" | 42 | 106 | 99;
+export type ResolutionId = "480p" | "768p";
 export type MediaKind = "image" | "video" | "audio" | "file";
 export type PromptDocument = JSONContent;
 
@@ -26,7 +29,23 @@ export interface BaseDraft {
   duration: number;
   aspect: AspectId;
   generationCount: GenerationCount;
-  turbo: boolean;
+  samplingProfile?: SamplingProfileId;
+  seed?: SeedChoice;
+  resolution?: ResolutionId;
+  turbo?: boolean;
+  loras?: Record<string, number>;
+}
+
+export interface LoraConfig {
+  id: string;
+  name: string;
+  filename: string;
+  default_enabled: boolean;
+  default_strength: number;
+  min_strength: number;
+  max_strength: number;
+  step: number;
+  prompt?: string | null;
 }
 
 export interface FramesDraft extends BaseDraft {
@@ -79,6 +98,7 @@ export interface ReferencesModeSpec {
 }
 
 export interface SamplingProfile {
+  label: string;
   method: string;
   lora: string | null;
   preview: boolean;
@@ -86,19 +106,26 @@ export interface SamplingProfile {
   sampler: string;
   scheduler: string;
   lora_strength: number | null;
+  spectrum: boolean;
+  turbo: boolean;
   low_vram: boolean | null;
 }
 
 export interface H3Specs {
-  version: "1.2";
+  version: "1.6";
   modes: {
     frames: FramesModeSpec;
     references: ReferencesModeSpec;
   };
   output: {
+    loras: LoraConfig[];
     sampling: {
-      default: "turbo" | "base";
-      profiles: Record<"turbo" | "base", SamplingProfile>;
+      default: SamplingProfileId;
+      profiles: Record<SamplingProfileId, SamplingProfile>;
+    };
+    seed: {
+      default: "random";
+      options: Array<{ id: string; label: string; value: number | null }>;
     };
     duration: {
       default_seconds: number;
@@ -109,6 +136,14 @@ export interface H3Specs {
       base_short_edge: number;
       max_pixels: number;
       native_aspects: Array<{ id: AspectId; width: number; height: number }>;
+      default_resolution: ResolutionId;
+      resolutions: Record<ResolutionId, {
+        label: string;
+        short_edge: number;
+        max_pixels: number;
+        recommended: boolean;
+        native_aspects: Array<{ id: AspectId; width: number; height: number }>;
+      }>;
     };
   };
 }
@@ -116,7 +151,9 @@ export interface H3Specs {
 export type JobStatus = "uploading" | "queued" | "running" | "completed" | "failed" | "expired" | "cancelled";
 
 export interface GenerationMetadata {
+  mode?: GenerationMode;
   model?: string;
+  checkpoint?: string;
   width?: number;
   height?: number;
   duration_seconds?: number;
@@ -127,9 +164,16 @@ export interface GenerationMetadata {
   sampler?: string;
   scheduler?: string;
   turbo?: boolean;
+  sampling_profile?: SamplingProfileId;
+  resolution?: ResolutionId;
   lora?: string;
   lora_strength?: number;
   lora_low_vram?: boolean;
+  spectrum?: { version: string; offline_smoothing_replay: boolean; audio_blend_weight: number };
+  loras?: Array<{ id: string; name: string; filename: string; strength: number }>;
+  audio?: { native: boolean; sample_rate_hz: number; channels: number };
+  references?: Array<{ id?: string; kind?: MediaKind; tags?: string[] }>;
+  bytes?: number;
 }
 
 export interface JobProgress {
@@ -158,10 +202,16 @@ export interface Job {
   prompt: string;
   createdAt: number;
   updatedAt: number;
+  finishedAt?: number;
+  samplingStartedAt?: number;
   status: JobStatus;
   duration: number;
   aspect: AspectId;
   turbo: boolean;
+  samplingProfile?: SamplingProfileId;
+  seed?: SeedChoice;
+  resolution?: ResolutionId;
+  loras?: Record<string, number>;
   displayAspect?: number;
   inputAssetIds: string[];
   firstFrameId?: string;
@@ -184,6 +234,9 @@ export interface JobCreateResponse {
 }
 
 export interface JobStatusResponse extends JobCreateResponse {
+  createdAt?: number;
+  updatedAt?: number;
+  samplingStartedAt?: number;
   error?: string;
   metadata?: GenerationMetadata;
   videoUrl?: string;

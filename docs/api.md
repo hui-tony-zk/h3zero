@@ -4,10 +4,11 @@ The deployed `https://...modal.run` URL serves H3Zero and the same-origin API.
 The endpoint is public and does not require a Modal or Hugging Face API key.
 Polling, static files, and video downloads are CPU-only.
 
-Both generation modes use the preview MiniMax-H3 Turbo LoRA with its required
-version-adaptive audio/video sampler. The default is eight `simple` steps at
-LoRA strength `1.0`; `/api/specs` reports the pinned filename and supported
-4–8 step range.
+Both generation modes expose the same four sampling profiles: LightX2V Turbo
+at four or eight `res_multistep` / `simple` steps, Spectrum at 20 steps, and
+Base at 20 steps. H3Zero submits every profile at 480p with a random seed and
+does not expose resolution or seed controls. `/api/specs` reports the pinned
+files and exact settings.
 
 Copy the URL printed beside `web =>` after `npm run setup`, then set it for the
 curl examples in your current terminal:
@@ -34,10 +35,12 @@ deployed H3Zero and `npm run generate` do not use it.
 | `POST` | `/api/jobs` | Submit a multipart job |
 | `GET` | `/api/jobs/{id}` | Read status and progress |
 | `GET` | `/api/jobs/{id}/video` | Stream the completed MP4 |
+| `POST` | `/api/jobs/{id}/acknowledge` | Release a completed result after durable browser caching |
 | `DELETE` | `/api/jobs/{id}` | Cancel and delete a job |
 | `GET` | `/api/cloud-sync/{username}/favorites` | List a sync name's favorites |
-| `PUT` | `/api/cloud-sync/{username}/favorites/{id}` | Save favorite metadata and remix sources |
-| `DELETE` | `/api/cloud-sync/{username}/favorites/{id}` | Remove a favorite and its copied sources |
+| `PUT` | `/api/cloud-sync/{username}/favorites/{id}` | Save a favorite video, metadata, and remix sources |
+| `GET` | `/api/cloud-sync/{username}/favorites/{id}/video` | Stream a favorite's durable MP4 |
+| `DELETE` | `/api/cloud-sync/{username}/favorites/{id}` | Remove a favorite video and its copied sources |
 | `GET` | `/api/cloud-sync/{username}/assets/{id}` | Fetch a saved remix source |
 
 ## Submit a Frames job
@@ -45,14 +48,14 @@ deployed H3Zero and `npm run generate` do not use it.
 `prompt` is required. `config` is a JSON string. First and last frames accept
 PNG, JPEG, or WebP files up to 20 MiB.
 
-Turbo is enabled by default. Set `"turbo":false` to use the base 20-step
-`res_multistep` workflow. When sampling fields are omitted, the API selects the
-matching profile defaults (Turbo: 8 steps; base: 20 steps).
+Set `sampling_profile` to `turbo_4`, `turbo_8`, `spectrum`, or `base`. It
+defaults to `turbo_4`. The production composer always uses a random seed and a
+480p canvas; native 16:9 output is 864×480 and portrait output is 480×864.
 
 ```bash
 curl -X POST "$H3_MODAL_URL/api/jobs" \
   -F 'prompt=A paper dragon wakes. Audio: paper rustling.' \
-  -F 'config={"mode":"frames","duration_seconds":5,"geometry_source":"first_frame"}' \
+  -F 'config={"mode":"frames","duration_seconds":5,"geometry_source":"first_frame","sampling_profile":"turbo_4"}' \
   -F 'first_frame=@first.png;type=image/png'
 ```
 
@@ -108,8 +111,21 @@ Progress phases are `queued`, `starting`, `loading`, `conditioning`, `sampling`,
 sampling phase.
 
 A completed result includes dimensions, frames, actual duration, FPS, audio
-metadata, seed, the selected Turbo/base sampling details, assigned reference
-tags, and `video_url`. LoRA fields are present only for Turbo generations.
+metadata, seed, the selected sampling profile and settings, assigned reference
+tags, and `video_url`. LoRA fields are present only for Turbo generations;
+Spectrum generations include their Spectrum settings.
+
+Completed job videos are delivery artifacts, not permanent server storage. The
+H3Zero browser caches the MP4 in IndexedDB and then acknowledges the job so its
+server-side video, metadata, call ID, and progress can be removed. API clients
+should do the same after safely storing the download:
+
+```bash
+curl -X POST "$H3_MODAL_URL/api/jobs/$JOB_ID/acknowledge"
+```
+
+Unacknowledged jobs are retained for 24 hours to allow interrupted downloads,
+then removed by scheduled maintenance. Acknowledgement is idempotent.
 
 ## Local development
 
@@ -125,23 +141,29 @@ only for Vite's local `/api` proxy; never put Modal credentials in it.
 
 ## Favorites
 
-Favorites are stored under a Modal cloud sync name in the same durable output
-Volume as completed jobs. The generated video is not duplicated. A favorite
-may additionally store copies of its source inputs so another browser can
-restore them for remixing.
+Favorites are the durable server-side results. They are stored under a Modal
+cloud sync name and include their own MP4 plus optional source-input copies so
+another browser can view and remix them after temporary job storage is gone.
 
 ```http
 GET /api/cloud-sync/{username}/favorites
 PUT /api/cloud-sync/{username}/favorites/{job_id}
+GET /api/cloud-sync/{username}/favorites/{job_id}/video
 DELETE /api/cloud-sync/{username}/favorites/{job_id}
 GET /api/cloud-sync/{username}/assets/{asset_id}
 ```
 
 `PUT` accepts multipart fields named `job` (the browser job JSON), `assets` (an
-array of source-asset descriptors), and matching file fields `asset_0`,
-`asset_1`, and so on. Only completed jobs with an existing persisted video can
-be favorited. Removing a favorite deletes its copied sources but not the
-generated video.
+array of source-asset descriptors), an optional `video` MP4, and matching file
+fields `asset_0`, `asset_1`, and so on. The MP4 is required after temporary job
+storage has been acknowledged; while the completed job still exists, the
+server can copy it directly. Removing a favorite deletes its durable MP4 and
+unreferenced copied sources.
+
+Deployments upgrading from the legacy shared-job layout migrate favorite MP4s
+before cleanup. Migration is idempotent and old favorite routes remain readable
+during the transition. `npm run maintenance` runs migration followed by cleanup
+on demand; the deployed web app also runs it every six hours.
 
 Sync names are lowercase, 2–32 characters, and may contain letters, numbers,
 dots, hyphens, and underscores. They identify separate favorite collections but

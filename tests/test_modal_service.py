@@ -37,14 +37,17 @@ class ModalServiceDefinitionTests(unittest.TestCase):
             'COMFY_COMMIT = "43cb4fffc89bba20ab7bd61467a36d0339338dab"',
             source,
         )
+        self.assertNotIn("ComfyUI-MiniMax-H3-Turbo", source)
         self.assertIn(
-            'TURBO_NODE_COMMIT = "55fee864dd7b2976b1c4ce3c3d5f7968f181409f"',
+            'TURBO_REVISION = "e6346777701aa2b64d42ed058cdd71ae00e7cd52"',
             source,
         )
+        self.assertIn('TURBO_REPO = "lightx2v/Minimax-h3-Turbo"', source)
         self.assertIn(
-            'TURBO_REVISION = "afc0346516372a17162c14df3c5264de1d9aa1c0"',
+            'SPECTRUM_COMMIT = "4b9a7d1163348c67e7e475423f24f8b7abb23565"',
             source,
         )
+        self.assertIn("ComfyUI-Spectrum-MiniMax-H3", source)
         self.assertIn('"loras",', source)
 
     def test_h3_uses_cpu_memory_snapshot_lifecycle(self):
@@ -93,7 +96,7 @@ class ModalServiceDefinitionTests(unittest.TestCase):
             {"prepare_snapshot": True, "boot": False},
         )
 
-    def test_web_uses_minimum_resources_and_one_container(self):
+    def test_web_uses_minimum_resources_and_two_containers(self):
         source = Path("modal_services/h3.py").read_text(encoding="utf-8")
         tree = ast.parse(source)
         web = next(
@@ -112,8 +115,8 @@ class ModalServiceDefinitionTests(unittest.TestCase):
 
         self.assertNotIn("cpu", keywords)
         self.assertNotIn("memory", keywords)
-        self.assertEqual(keywords["max_containers"].value, 1)
-        self.assertEqual(keywords["scaledown_window"].value, 2)
+        self.assertEqual(keywords["max_containers"].value, 2)
+        self.assertEqual(keywords["scaledown_window"].value, 15)
 
 
 if __name__ == "__main__":

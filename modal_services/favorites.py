@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import uuid
 from pathlib import Path
 
@@ -42,6 +43,14 @@ def metadata_path(username: str, job_id: str, root: str | Path = jobs.OUTPUT_ROO
 
 def asset_path(username: str, asset_id: str, root: str | Path = jobs.OUTPUT_ROOT) -> Path:
     return _user_root(username, root) / "assets" / f"{validate_asset_id(asset_id)}.blob"
+
+
+def video_path(username: str, job_id: str, root: str | Path = jobs.OUTPUT_ROOT) -> Path:
+    return _user_root(username, root) / "videos" / f"{jobs.validate_job_id(job_id)}.mp4"
+
+
+def video_url(username: str, job_id: str) -> str:
+    return f"/api/cloud-sync/{normalize_username(username)}/favorites/{jobs.validate_job_id(job_id)}/video"
 
 
 def read_favorite(username: str, job_id: str, root: str | Path = jobs.OUTPUT_ROOT) -> dict | None:
@@ -87,6 +96,69 @@ def write_favorite(username: str, record: dict, root: str | Path = jobs.OUTPUT_R
     return next_record
 
 
+def migrate_legacy_video(
+    username: str,
+    job_id: str,
+    root: str | Path = jobs.OUTPUT_ROOT,
+) -> bool:
+    """Copy a legacy job video into favorite-owned storage, then update metadata."""
+    username = normalize_username(username)
+    job_id = jobs.validate_job_id(job_id)
+    record = read_favorite(username, job_id, root)
+    if record is None:
+        return False
+
+    destination = video_path(username, job_id, root)
+    changed = False
+    if not destination.is_file():
+        source = jobs.video_path(job_id, root)
+        if not source.is_file():
+            return False
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            shutil.copyfile(source, temporary)
+            temporary.replace(destination)
+        finally:
+            temporary.unlink(missing_ok=True)
+        changed = True
+
+    expected_url = video_url(username, job_id)
+    if record.get("contentUrl") != expected_url:
+        write_favorite(username, {**record, "contentUrl": expected_url}, root)
+        changed = True
+    return changed
+
+
+def migrate_legacy_videos(root: str | Path = jobs.OUTPUT_ROOT) -> dict:
+    """Migrate every readable legacy favorite without deleting its source job."""
+    summary = {"migrated": 0, "ready": 0, "missing": []}
+    users_root = _root(root)
+    if not users_root.is_dir():
+        return summary
+    for directory in users_root.iterdir():
+        if not directory.is_dir():
+            continue
+        try:
+            username = normalize_username(directory.name)
+        except ValueError:
+            continue
+        for record in list_favorites(username, root):
+            job_id = str(record.get("id", ""))
+            try:
+                changed = migrate_legacy_video(username, job_id, root)
+            except (json.JSONDecodeError, ValueError):
+                summary["missing"].append({"username": username, "job_id": job_id})
+                continue
+            if video_path(username, job_id, root).is_file():
+                summary["ready"] += 1
+                if changed:
+                    summary["migrated"] += 1
+            else:
+                summary["missing"].append({"username": username, "job_id": job_id})
+    return summary
+
+
 def referenced_asset_ids(username: str, root: str | Path = jobs.OUTPUT_ROOT) -> set[str]:
     referenced = set()
     for favorite in list_favorites(username, root):
@@ -99,6 +171,7 @@ def referenced_asset_ids(username: str, root: str | Path = jobs.OUTPUT_ROOT) -> 
 def delete_favorite(username: str, job_id: str, root: str | Path = jobs.OUTPUT_ROOT) -> None:
     previous = read_favorite(username, job_id, root)
     metadata_path(username, job_id, root).unlink(missing_ok=True)
+    video_path(username, job_id, root).unlink(missing_ok=True)
     if previous is None:
         return
     still_referenced = referenced_asset_ids(username, root)

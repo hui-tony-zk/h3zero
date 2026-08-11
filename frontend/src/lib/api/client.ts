@@ -46,6 +46,10 @@ export async function getJobStatus(id: string) {
   return parseJobStatus(await response.json(), id);
 }
 
+export async function acknowledgeJob(id: string) {
+  await request(`/jobs/${encodeURIComponent(id)}/acknowledge`, { method: "POST" });
+}
+
 export async function deleteJob(id: string) {
   const response = await fetch(`${API_BASE}/jobs/${encodeURIComponent(id)}`, { method: "DELETE" });
   if (response.status === 404) return;
@@ -57,10 +61,11 @@ export async function getFavorites(username: string) {
   return parseFavoriteSnapshot(await response.json());
 }
 
-export async function putFavorite(username: string, job: Job, assets: MediaAsset[], manifest: FavoriteAsset[]) {
+export async function putFavorite(username: string, job: Job, assets: MediaAsset[], manifest: FavoriteAsset[], video?: Blob | null) {
   const form = new FormData();
   form.set("job", JSON.stringify(job));
   form.set("assets", JSON.stringify(manifest));
+  if (video) form.set("video", video, `${job.id}.mp4`);
   assets.forEach((asset, index) => form.set(`asset_${index}`, asset.file, asset.name));
   const response = await request(`/cloud-sync/${encodeURIComponent(username)}/favorites/${encodeURIComponent(job.id)}`, {
     method: "PUT",

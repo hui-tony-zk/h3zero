@@ -3,8 +3,9 @@ import { loadAsset, saveAsset, saveFavoriteAsset } from "../lib/assets";
 import { getFavoriteAsset } from "../lib/api/client";
 import { readCloudSyncUsername } from "../lib/cloudSync";
 import { emptyFramesDraft, emptyReferencesDraft, readDrafts, writeDrafts } from "../lib/storage/draftRepository";
-import { promptDocumentToText, promptTextToDocument, prunePromptDocument, restoreReferenceTokens } from "../lib/promptDocument";
-import type { BaseDraft, DraftCollection, GenerationMode, Job, MediaAsset } from "../types";
+import { promptDocumentToText, promptTextToDocument, prunePromptDocument, replaceReferenceInPromptDocument, restoreReferenceTokens } from "../lib/promptDocument";
+import { isTurboProfile, samplingProfileId } from "../lib/sampling";
+import type { BaseDraft, DraftCollection, GenerationMode, Job, MediaAsset, SamplingProfileId } from "../types";
 
 const defaults: DraftCollection = { frames: emptyFramesDraft(), references: emptyReferencesDraft() };
 
@@ -43,6 +44,24 @@ export function useDrafts() {
     });
   }, []);
 
+  const replaceReference = useCallback(async (id: string, replacement: MediaAsset) => {
+    if (replacement.id === id) throw new Error("Replacement must use a new asset ID.");
+    await saveAsset(replacement);
+    setDrafts((current) => {
+      const references = current.references.references.map((asset) => asset.id === id ? replacement : asset);
+      const promptDocument = replaceReferenceInPromptDocument(current.references.promptDocument, id, replacement);
+      return {
+        ...current,
+        references: {
+          ...current.references,
+          references,
+          promptDocument,
+          prompt: promptDocumentToText(promptDocument, references),
+        },
+      };
+    });
+  }, []);
+
   const removeReference = useCallback((id: string) => {
     setDrafts((current) => {
       const references = current.references.references.filter((asset) => asset.id !== id);
@@ -52,6 +71,10 @@ export function useDrafts() {
   }, []);
 
   const restoreInputs = useCallback(async (job: Job) => {
+    const savedProfile = job.metadata?.sampling_profile ?? job.samplingProfile ?? (job.turbo ? "turbo_4" : "spectrum") as SamplingProfileId;
+    const samplingProfile = samplingProfileId({ samplingProfile: savedProfile, turbo: job.turbo });
+    const seed = "random" as const;
+    const resolution = "480p" as const;
     const restoreAsset = async (id: string) => {
       const local = await loadAsset(id);
       if (local) return local;
@@ -65,11 +88,11 @@ export function useDrafts() {
     if (job.mode === "references") {
       const references = (await Promise.all((job.referenceIds ?? job.inputAssetIds).map(restoreAsset))).filter((asset): asset is MediaAsset => asset !== null);
       const prompt = restoreReferenceTokens(job.prompt, references);
-      setDrafts((current) => ({ ...current, references: { ...current.references, prompt, promptDocument: promptTextToDocument(prompt, references), duration: job.duration, aspect: job.aspect, turbo: job.turbo, references } }));
+      setDrafts((current) => ({ ...current, references: { ...current.references, prompt, promptDocument: promptTextToDocument(prompt, references), duration: job.duration, aspect: job.aspect, samplingProfile, seed, resolution, turbo: isTurboProfile(samplingProfile), loras: job.loras ?? {}, references } }));
       return;
     }
     const [firstFrame, lastFrame] = await Promise.all([job.firstFrameId ? restoreAsset(job.firstFrameId) : null, job.lastFrameId ? restoreAsset(job.lastFrameId) : null]);
-    setDrafts((current) => ({ ...current, frames: { ...current.frames, prompt: job.prompt, promptDocument: promptTextToDocument(job.prompt), duration: job.duration, aspect: job.aspect, turbo: job.turbo, firstFrame, lastFrame } }));
+    setDrafts((current) => ({ ...current, frames: { ...current.frames, prompt: job.prompt, promptDocument: promptTextToDocument(job.prompt), duration: job.duration, aspect: job.aspect, samplingProfile, seed, resolution, turbo: isTurboProfile(samplingProfile), loras: job.loras ?? {}, firstFrame, lastFrame } }));
   }, []);
 
   const resetActiveDraft = useCallback(() => {
@@ -78,6 +101,6 @@ export function useDrafts() {
 
   return useMemo(() => ({
     activeMode, setActiveMode, activeDraft: drafts[activeMode], hydrated,
-    updateActiveDraft, setFrame, addReferences, removeReference, restoreInputs, resetActiveDraft,
-  }), [activeMode, addReferences, drafts, hydrated, removeReference, resetActiveDraft, restoreInputs, setFrame, updateActiveDraft]);
+    updateActiveDraft, setFrame, addReferences, replaceReference, removeReference, restoreInputs, resetActiveDraft,
+  }), [activeMode, addReferences, drafts, hydrated, removeReference, replaceReference, resetActiveDraft, restoreInputs, setFrame, updateActiveDraft]);
 }

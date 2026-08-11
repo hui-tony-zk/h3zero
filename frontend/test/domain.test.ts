@@ -2,13 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { isGithubStarReminderMilestone } from "../src/lib/githubStarReminder";
 import { groupJobs, pendingJob, sortJobs, uploadingJob } from "../src/lib/jobs";
-import { emptyPromptDocument, hydratePromptDocument, promptDocumentToText, promptTextToDocument, prunePromptDocument, restoreReferenceTokens } from "../src/lib/promptDocument";
+import { emptyPromptDocument, hydratePromptDocument, promptDocumentToText, promptTextToDocument, prunePromptDocument, replaceReferenceInPromptDocument, restoreReferenceTokens } from "../src/lib/promptDocument";
 import { PROMPT_SECTION_NODE } from "../src/lib/promptSections";
 import { PROMPT_TASK_TYPE_NODE, removeLastPromptTaskType } from "../src/lib/promptTaskTypes";
 import { hasReferencePromptContent, REFERENCE_PROMPT_STRUCTURE } from "../src/lib/promptDefaults";
 import { buildReferenceInsertion } from "../src/lib/promptRecipes";
 import { describeFavoriteAssets, mergeFavoriteSnapshot, parseFavoriteSnapshot } from "../src/lib/favorites";
 import { normalizeCloudSyncUsername } from "../src/lib/cloudSync";
+import { generationSettingSections } from "../src/lib/generationSettings";
+import { samplingProfileId } from "../src/lib/sampling";
 import type { Job } from "../src/types";
 import { emptyFramesDraft, emptyReferencesDraft } from "../src/lib/storage/draftRepository";
 import { asset } from "./fixtures";
@@ -26,7 +28,7 @@ test("active jobs sort first, then newest to oldest", () => {
 test("cloud favorites merge into local history without duplicating jobs", () => {
   const base = { mode: "frames", prompt: "local", duration: 5, aspect: "16:9", inputAssetIds: [], contentUrl: "" } as const;
   const local = [
-    { ...base, id: "kept", status: "completed", createdAt: 30, updatedAt: 30, hearted: false },
+    { ...base, id: "kept", status: "completed", createdAt: 30, updatedAt: 30, hearted: false, loras: { old: 0.4 } },
     { ...base, id: "stale", status: "completed", createdAt: 20, updatedAt: 20, hearted: true },
   ] as Job[];
   const remote = parseFavoriteSnapshot({ jobs: [{
@@ -36,6 +38,7 @@ test("cloud favorites merge into local history without duplicating jobs", () => 
     createdAt: 30,
     updatedAt: 31,
     hearted: true,
+    loras: { pose: 0.8 },
     favoriteAssets: [{ id: "frame", name: "frame.png", type: "image/png", kind: "image", size: 5, createdAt: 10 }],
   }, {
     ...base,
@@ -48,6 +51,7 @@ test("cloud favorites merge into local history without duplicating jobs", () => 
   const merged = mergeFavoriteSnapshot(local, remote);
   assert.deepEqual(merged.map(({ id }) => id), ["kept", "stale", "remote-only"]);
   assert.equal(merged[0].hearted, true);
+  assert.deepEqual(merged[0].loras, { pose: 0.8 });
   assert.equal(merged[0].favoriteAssets?.[0]?.id, "frame");
   assert.equal(merged[1].hearted, false);
 });
@@ -96,6 +100,38 @@ test("new drafts default to two generations", () => {
   assert.equal(emptyFramesDraft().turbo, true);
 });
 
+test("remix profile restoration preserves every explicit sampling profile", () => {
+  for (const profile of ["turbo_4", "turbo_8", "spectrum", "base"] as const) {
+    assert.equal(samplingProfileId({ samplingProfile: profile, turbo: profile.startsWith("turbo_") }), profile);
+  }
+});
+
+test("generation settings expose resolved metadata with the prompt last", () => {
+  const job = {
+    id: "settings-job", mode: "frames", prompt: "private prompt text", duration: 5,
+    aspect: "9:16", turbo: true, samplingProfile: "turbo_4", seed: "random",
+    resolution: "768p", inputAssetIds: [], contentUrl: "", status: "completed",
+    createdAt: 1_000, updatedAt: 93_000, samplingStartedAt: 31_000, finishedAt: 93_000,
+    metadata: {
+      model: "MiniMax-H3-FL2VA", checkpoint: "model.safetensors", width: 768,
+      height: 1344, duration_seconds: 5.17, frames: 124, fps: 24, seed: 987654,
+      steps: 4, sampler: "res_multistep", scheduler: "simple", turbo: true,
+      sampling_profile: "turbo_4", resolution: "768p",
+      lora: "turbo.safetensors", lora_strength: 1,
+      audio: { native: true, sample_rate_hz: 32000, channels: 2 },
+    },
+  } as Job;
+  const sections = generationSettingSections(job);
+  const flat = sections.flatMap((section) => section.items);
+  assert.equal(flat.find((entry) => entry.label === "Seed")?.value, "987654");
+  assert.equal(flat.find((entry) => entry.label === "Output size")?.value, "768 × 1344");
+  assert.equal(flat.find((entry) => entry.label === "Generation time")?.value, "1m 2s · sampling → video ready");
+  assert.equal(sections.at(-1)?.title, "Prompt");
+  assert.equal(sections.at(-1)?.text, job.prompt);
+  const withoutStart = generationSettingSections({ ...job, samplingStartedAt: undefined });
+  assert.equal(withoutStart.flatMap((section) => section.items).some((entry) => entry.label === "Generation time"), false);
+});
+
 test("optimistic jobs start in the upload phase and retain batch position", () => {
   const draft = { ...emptyReferencesDraft(), prompt: "scene", references: [asset("hero")] };
   const job = uploadingJob("upload:batch:1", draft, { id: "batch", index: 1, size: 2, createdAt: 20 });
@@ -119,6 +155,20 @@ test("reference mentions round-trip and disappear with their attachment", () => 
   const document = promptTextToDocument("Follow <Picture 1>", references);
   assert.equal(promptDocumentToText(document, references), "Follow <Picture 1>");
   assert.equal(promptDocumentToText(prunePromptDocument(document, []), []), "Follow ");
+});
+
+test("replacing a reference retargets prompt mentions without mutating the original asset", () => {
+  const original = asset("original");
+  const document = promptTextToDocument("Follow <Picture 1> closely", [original]);
+  const replacement = asset("replacement");
+  const replacedDocument = replaceReferenceInPromptDocument(document, original.id, replacement);
+  const hydrated = hydratePromptDocument(replacedDocument, [replacement]);
+  const mention = hydrated.content?.[0]?.content?.find((node) => node.type === "referenceMention");
+  assert.notEqual(replacement.id, original.id);
+  assert.equal(mention?.attrs?.id, replacement.id);
+  assert.equal(mention?.attrs?.label, replacement.name);
+  assert.equal(promptDocumentToText(hydrated, [replacement]), "Follow <Picture 1> closely");
+  assert.equal(promptDocumentToText(hydratePromptDocument(document, [original]), [original]), "Follow <Picture 1> closely");
 });
 
 test("stored reference tokens hydrate without case sensitivity", () => {

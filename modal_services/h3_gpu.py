@@ -17,7 +17,14 @@ import modal
 
 from minimax_h3 import comfy as comfy_client
 from minimax_h3 import hf
+from minimax_h3.loras import active_loras, download_specs, resolve_lora_strengths
 from minimax_h3.progress import progress_from_comfy_event
+from minimax_h3.specs import (
+    TURBO_4_LORA,
+    TURBO_8_LORA,
+    TURBO_LORA_STRENGTH,
+    resolve_sampling_profile,
+)
 from minimax_h3.runtime import (
     PYTORCH_CUDA_INDEX,
     PYTORCH_VERSION,
@@ -36,14 +43,9 @@ from minimax_h3.config import (
 from minimax_h3.workflow import (
     AUDIO_VAE,
     FRAME_DIFFUSION_MODEL,
+    REFERENCE_CONDITIONING_DIFFUSION_MODEL,
     REFERENCE_DIFFUSION_MODEL,
     TEXT_ENCODER,
-    TURBO_LORA,
-    TURBO_LORA_STRENGTH,
-    TURBO_LOW_VRAM,
-    TURBO_SAMPLER,
-    TURBO_SCHEDULER,
-    TURBO_STEPS,
     VIDEO_VAE,
     aligned_frame_count,
     build_frames_workflow,
@@ -53,12 +55,12 @@ from minimax_h3.workflow import (
 from modal_services import jobs
 
 COMFY_COMMIT = "43cb4fffc89bba20ab7bd61467a36d0339338dab"
-TURBO_NODE_COMMIT = "55fee864dd7b2976b1c4ce3c3d5f7968f181409f"
-TURBO_NODE_REPO = "https://github.com/Larryvrh/ComfyUI-MiniMax-H3-Turbo.git"
 MODEL_REVISION = "cfc0a7e86b7bfd99199db90a536ab187af61a8b9"
 MODEL_REPO = "Comfy-Org/MiniMax-H3"
-TURBO_REVISION = "afc0346516372a17162c14df3c5264de1d9aa1c0"
-TURBO_REPO = "larryvrh/MiniMax-H3-Turbo-Lora"
+TURBO_REVISION = "e6346777701aa2b64d42ed058cdd71ae00e7cd52"
+TURBO_REPO = "lightx2v/Minimax-h3-Turbo"
+SPECTRUM_COMMIT = "4b9a7d1163348c67e7e475423f24f8b7abb23565"
+SPECTRUM_REPO = "https://github.com/xmarre/ComfyUI-Spectrum-MiniMax-H3.git"
 
 MODEL_DOWNLOADS = [
     (
@@ -68,6 +70,8 @@ MODEL_DOWNLOADS = [
         FRAME_DIFFUSION_MODEL,
         MODEL_REVISION,
     ),
+    # Retain Ref2VA in the Volume for fallback and controlled comparisons even
+    # though the production reference workflow currently runs on FL2VA.
     (
         MODEL_REPO,
         f"diffusion_models/{REFERENCE_DIFFUSION_MODEL}",
@@ -98,12 +102,19 @@ MODEL_DOWNLOADS = [
     ),
     (
         TURBO_REPO,
-        TURBO_LORA,
+        TURBO_4_LORA,
         "loras",
-        TURBO_LORA,
+        TURBO_4_LORA,
         TURBO_REVISION,
     ),
-]
+    (
+        TURBO_REPO,
+        TURBO_8_LORA,
+        "loras",
+        TURBO_8_LORA,
+        TURBO_REVISION,
+    ),
+] + download_specs()
 
 model_volume = modal.Volume.from_name(MODEL_VOLUME_NAME, create_if_missing=True)
 output_volume = modal.Volume.from_name(OUTPUT_VOLUME_NAME, create_if_missing=True)
@@ -140,13 +151,13 @@ comfy_image = (
         "python -m pip install -r /root/comfy/ComfyUI/requirements.txt",
     )
     .run_commands(
-        "git init /root/comfy/ComfyUI/custom_nodes/ComfyUI-MiniMax-H3-Turbo",
-        "git -C /root/comfy/ComfyUI/custom_nodes/ComfyUI-MiniMax-H3-Turbo "
-        f"remote add origin {TURBO_NODE_REPO}",
-        "git -C /root/comfy/ComfyUI/custom_nodes/ComfyUI-MiniMax-H3-Turbo "
-        f"fetch --depth 1 origin {TURBO_NODE_COMMIT}",
-        "git -C /root/comfy/ComfyUI/custom_nodes/ComfyUI-MiniMax-H3-Turbo "
-        f"checkout --detach {TURBO_NODE_COMMIT}",
+        "git init /root/comfy/ComfyUI/custom_nodes/ComfyUI-Spectrum-MiniMax-H3",
+        "git -C /root/comfy/ComfyUI/custom_nodes/ComfyUI-Spectrum-MiniMax-H3 "
+        f"remote add origin {SPECTRUM_REPO}",
+        "git -C /root/comfy/ComfyUI/custom_nodes/ComfyUI-Spectrum-MiniMax-H3 "
+        f"fetch --depth 1 origin {SPECTRUM_COMMIT}",
+        "git -C /root/comfy/ComfyUI/custom_nodes/ComfyUI-Spectrum-MiniMax-H3 "
+        f"checkout --detach {SPECTRUM_COMMIT}",
     )
     .pip_install(
         f"torch=={PYTORCH_VERSION}",
@@ -265,6 +276,20 @@ class H3Service:
         if process and process.poll() is None:
             process.terminate()
 
+    def _restart_comfyui(self) -> None:
+        """Replace a stalled ComfyUI process before this container accepts more work."""
+        process = getattr(self, "comfy_process", None)
+        if process and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=10)
+            except Exception:
+                process.kill()
+                process.wait(timeout=10)
+        self.comfy_process = comfy_client.start_comfyui(self.port)
+        comfy_client.wait_for_server(self.port)
+        print("ComfyUI restarted after stalled workflow", flush=True)
+
     def _stage_input(self, raw: bytes | None, label: str) -> str | None:
         if raw is None:
             return None
@@ -313,14 +338,27 @@ class H3Service:
         return progress
 
     def _progress_handler(self, job_id: str | None):
-        last = {"signature": None}
+        last = {"signature": None, "sampling_started": False}
 
         def publish(phase: str, message: str, percent: float | None = None) -> None:
             signature = (phase, message, None if percent is None else round(percent, 6))
             if signature == last["signature"]:
                 return
             last["signature"] = signature
-            self._put_progress(job_id, phase, message, percent=percent)
+            progress = self._put_progress(job_id, phase, message, percent=percent)
+            if phase == "sampling" and not last["sampling_started"]:
+                last["sampling_started"] = True
+                if job_id is not None and progress is not None:
+                    try:
+                        self._update_persisted_job(
+                            job_id,
+                            "running",
+                            sampling_started_at=progress["updated_at"],
+                        )
+                    except Exception:
+                        # Timing is optional metadata and must never interrupt
+                        # an otherwise healthy generation.
+                        pass
 
         def on_event(event: str, data: dict) -> None:
             update = progress_from_comfy_event(event, data)
@@ -355,10 +393,13 @@ class H3Service:
         height: int = 480,
         duration_seconds: float = 5,
         seed: int | None = None,
+        resolution: str = "480p",
         turbo: bool = True,
+        sampling_profile: str | None = None,
         steps: int | None = None,
         sampler: str | None = None,
         scheduler: str | None = None,
+        loras: dict[str, float] | None = None,
         first_frame: bytes | None = None,
         last_frame: bytes | None = None,
         job_id: str | None = None,
@@ -383,6 +424,11 @@ class H3Service:
             raise ValueError("mode must be 'frames' or 'references'")
         if not isinstance(turbo, bool):
             raise ValueError("turbo must be a boolean")
+        profile_id, profile = resolve_sampling_profile(
+            sampling_profile,
+            turbo=turbo,
+        )
+        loras = resolve_lora_strengths(loras)
         if geometry_source not in {None, "first_frame", "last_frame"}:
             raise ValueError("invalid geometry_source")
         if mode == "references" and (first_frame is not None or last_frame is not None):
@@ -419,13 +465,15 @@ class H3Service:
                     height=height,
                     duration_seconds=duration_seconds,
                     seed=actual_seed,
-                    turbo=turbo,
+                    sampling_profile=profile_id,
                     steps=steps,
                     sampler=sampler,
                     scheduler=scheduler,
+                    loras=loras,
                     output_stem=output_stem,
                     references=staged_references,
                     ref_image_size=ref_image_size,
+                    resolution=resolution,
                 )
             else:
                 workflow = build_frames_workflow(
@@ -434,13 +482,15 @@ class H3Service:
                     height=height,
                     duration_seconds=duration_seconds,
                     seed=actual_seed,
-                    turbo=turbo,
+                    sampling_profile=profile_id,
                     steps=steps,
                     sampler=sampler,
                     scheduler=scheduler,
+                    loras=loras,
                     output_stem=output_stem,
                     first_frame_filename=first,
                     last_frame_filename=last,
+                    resolution=resolution,
                 )
             outputs = comfy_client.submit_and_watch(
                 workflow,
@@ -455,33 +505,46 @@ class H3Service:
 
             frames = aligned_frame_count(duration_seconds)
             sampling_steps = int(workflow["scheduler"]["inputs"]["steps"])
-            sampling_sampler = (
-                TURBO_SAMPLER if turbo else str(workflow["sampler"]["inputs"]["sampler_name"])
-            )
+            sampling_sampler = str(workflow["sampler"]["inputs"]["sampler_name"])
             metadata = {
                 "mode": mode,
-                "model": "MiniMax-H3-Ref2VA" if mode == "references" else "MiniMax-H3-FL2VA",
+                "model": (
+                    "MiniMax-H3-FL2VA (reference conditioning)"
+                    if mode == "references"
+                    else "MiniMax-H3-FL2VA"
+                ),
                 "checkpoint": (
-                    REFERENCE_DIFFUSION_MODEL if mode == "references" else FRAME_DIFFUSION_MODEL
+                    REFERENCE_CONDITIONING_DIFFUSION_MODEL
+                    if mode == "references"
+                    else FRAME_DIFFUSION_MODEL
                 ),
                 "width": width,
                 "height": height,
+                "resolution": resolution,
                 "duration_seconds": frames / 24,
                 "frames": frames,
                 "fps": 24,
                 "seed": actual_seed,
-                "turbo": turbo,
+                "turbo": profile["turbo"],
+                "sampling_profile": profile_id,
                 "steps": sampling_steps,
                 "sampler": sampling_sampler,
                 "scheduler": workflow["scheduler"]["inputs"]["scheduler"],
                 "audio": {"native": True, "sample_rate_hz": 32000, "channels": 2},
             }
-            if turbo:
+            if profile["lora"]:
                 metadata.update({
-                    "lora": TURBO_LORA,
-                    "lora_strength": TURBO_LORA_STRENGTH,
-                    "lora_low_vram": TURBO_LOW_VRAM,
+                    "lora": profile["lora"],
+                    "lora_strength": profile["lora_strength"],
                 })
+            if profile["spectrum"]:
+                metadata["spectrum"] = {
+                    "version": "0.2.5",
+                    "offline_smoothing_replay": True,
+                    "audio_blend_weight": 0.0,
+                }
+            if loras:
+                metadata["loras"] = active_loras(loras)
             if mode == "references":
                 metadata["references"] = [
                     {
@@ -512,6 +575,7 @@ class H3Service:
                 return {"id": job_id, "status": "completed", "result": metadata}
             return {"video": Path(generated).read_bytes(), **metadata}
         except Exception as exc:
+            stalled = isinstance(exc, comfy_client.ComfyWorkflowStalled)
             if persist_output and job_id is not None:
                 try:
                     failed_progress = self._put_progress(job_id, "error", "Generation failed")
@@ -525,6 +589,8 @@ class H3Service:
                     )
                 except Exception as persist_exc:
                     print(f"Could not persist failed job state: {persist_exc}", flush=True)
+            if stalled:
+                self._restart_comfyui()
             raise
         finally:
             for filename in local_inputs:

@@ -1,4 +1,5 @@
 import type { ComposerDraft, Job, JobCreateResponse } from "../types";
+import { isTurboProfile, samplingProfileId } from "./sampling";
 
 export type JobBatch = { id: string; jobs: Job[]; active: boolean; createdAt: number };
 type PendingBatch = { id: string; index: number; size: number; createdAt: number };
@@ -28,10 +29,11 @@ export function pendingJob(response: JobCreateResponse, draft: ComposerDraft, ba
   const frames = draft.mode === "frames" ? [draft.firstFrame, draft.lastFrame].filter((asset) => asset !== null) : [];
   const source = [...frames].sort((left, right) => left.createdAt - right.createdAt)[0];
   const inputAssetIds = draft.mode === "references" ? draft.references.map((asset) => asset.id) : frames.map((asset) => asset.id);
+  const samplingProfile = samplingProfileId(draft);
   return {
     id: response.id, mode: draft.mode, prompt: draft.prompt.trim(), createdAt: now, updatedAt: now,
     status: response.status, duration: draft.duration, aspect: draft.aspect,
-    turbo: draft.turbo,
+    turbo: isTurboProfile(samplingProfile), samplingProfile, seed: "random", resolution: "480p", loras: draft.loras ?? {},
     displayAspect: source?.width && source.height ? source.width / source.height : undefined,
     inputAssetIds,
     firstFrameId: draft.mode === "frames" ? draft.firstFrame?.id : undefined,

@@ -32,3 +32,19 @@ export async function prepareReferences(files: FileList, current: MediaAsset[], 
   }
   return assets;
 }
+
+export async function prepareReferenceReplacement(file: File, replaced: MediaAsset, current: MediaAsset[], spec: ReferencesModeSpec) {
+  const asset = await createMediaAsset(file);
+  if (asset.kind === "file") throw new Error(`${asset.name} is not a supported image, video, or audio file.`);
+  if (asset.kind !== replaced.kind) throw new Error(`Choose another ${replaced.kind} file for this reference.`);
+  const remaining = current.filter((candidate) => candidate.id !== replaced.id);
+  const policy = spec.attachments[asset.kind];
+  if (!policy.mime_types.includes(asset.type)) throw new Error(`${asset.name} is not a supported ${asset.kind} file.`);
+  if (asset.size > policy.max_bytes_each) throw new Error(`${asset.name} must be ${mib(policy.max_bytes_each)} MiB or smaller.`);
+  if ((asset.kind === "video" || asset.kind === "audio") && asset.duration !== undefined && (asset.duration < (policy.min_seconds_each ?? 0) || asset.duration > (policy.max_seconds_each ?? Infinity))) throw new Error(`${asset.name} must be ${policy.min_seconds_each}–${policy.max_seconds_each} seconds.`);
+  if (asset.kind === "video" || asset.kind === "audio") {
+    const total = remaining.filter((candidate) => candidate.kind === asset.kind).reduce((sum, candidate) => sum + (candidate.duration ?? 0), asset.duration ?? 0);
+    if (policy.max_seconds_total !== undefined && total > policy.max_seconds_total) throw new Error(`${asset.kind === "video" ? "Reference videos" : "Audio clips"} can total up to ${policy.max_seconds_total} seconds.`);
+  }
+  return asset;
+}

@@ -9,6 +9,10 @@ class ProgressTests(unittest.TestCase):
             progress_from_comfy_event("executing", {"node": "turbo_lora"})["phase"],
             "loading",
         )
+        self.assertEqual(
+            progress_from_comfy_event("executing", {"node": "spectrum"})["phase"],
+            "loading",
+        )
 
     def test_sampling_percent_is_truthful_and_phase_local(self):
         progress = progress_from_comfy_event(

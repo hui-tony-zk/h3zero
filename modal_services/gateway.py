@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import shutil
 import time
@@ -19,9 +20,8 @@ from starlette.concurrency import run_in_threadpool
 from minimax_h3 import media
 from minimax_h3.specs import (
     AUDIO_MIME_TYPES,
-    BASE_SAMPLER,
-    BASE_SCHEDULER,
-    BASE_STEPS,
+    DEFAULT_RESOLUTION,
+    DEFAULT_SAMPLING_PROFILE,
     IMAGE_MIME_TYPES,
     MAX_AUDIO_BYTES,
     MAX_IMAGE_BYTES,
@@ -33,13 +33,14 @@ from minimax_h3.specs import (
     MAX_VIDEO_BYTES,
     MIN_REFERENCE_DURATION,
     VIDEO_MIME_TYPES,
-    TURBO_SAMPLER,
-    TURBO_SCHEDULER,
-    TURBO_STEPS,
+    RESOLUTION_IDS,
     aspect_presets,
     get_specs,
     native_canvas,
+    resolve_resolution,
+    resolve_sampling_profile,
 )
+from minimax_h3.loras import resolve_lora_strengths
 from minimax_h3.workflow import validate_generation, validate_image_bytes
 from modal_services import favorites, jobs
 
@@ -49,19 +50,25 @@ DEFAULT_CONFIG = {
     "height": 480,
     "duration_seconds": 5,
     "seed": None,
+    "resolution": DEFAULT_RESOLUTION,
+    "sampling_profile": DEFAULT_SAMPLING_PROFILE,
     "turbo": True,
-    "steps": TURBO_STEPS,
-    "sampler": TURBO_SAMPLER,
-    "scheduler": TURBO_SCHEDULER,
+    "steps": 4,
+    "sampler": "res_multistep",
+    "scheduler": "simple",
     "geometry_source": None,
     "ref_image_size": "match",
     "references": [],
+    "loras": None,
 }
 CONFIG_FIELDS = set(DEFAULT_CONFIG)
 REFERENCE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 NATIVE_CANVASES = {
-    (preset["width"], preset["height"])
-    for preset in aspect_presets()
+    resolution: {
+        (preset["width"], preset["height"])
+        for preset in aspect_presets(resolution)
+    }
+    for resolution in RESOLUTION_IDS
 }
 
 MIME_SUFFIXES = {
@@ -81,6 +88,27 @@ MIME_SUFFIXES = {
 }
 
 
+def _lora_strengths_from_metadata(metadata: dict) -> dict[str, float]:
+    entries = metadata.get("loras")
+    if not isinstance(entries, list):
+        return {}
+    strengths = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        lora_id = entry.get("id")
+        strength = entry.get("strength")
+        if (
+            isinstance(lora_id, str)
+            and lora_id
+            and not isinstance(strength, bool)
+            and isinstance(strength, (int, float))
+            and math.isfinite(strength)
+        ):
+            strengths[lora_id] = float(strength)
+    return strengths
+
+
 def parse_config(prompt: str, raw: str | None) -> dict:
     if not prompt.strip():
         raise ValueError("prompt must not be blank")
@@ -97,14 +125,28 @@ def parse_config(prompt: str, raw: str | None) -> dict:
     config = {**DEFAULT_CONFIG, **supplied}
     if config["mode"] not in {"frames", "references"}:
         raise ValueError("mode must be 'frames' or 'references'")
-    if not isinstance(config["turbo"], bool):
+    if "turbo" in supplied and not isinstance(config["turbo"], bool):
         raise ValueError("turbo must be a boolean")
+    profile_id, profile = resolve_sampling_profile(
+        supplied.get("sampling_profile"),
+        turbo=config["turbo"],
+    )
+    if (
+        "sampling_profile" in supplied
+        and "turbo" in supplied
+        and config["turbo"] is not profile["turbo"]
+    ):
+        raise ValueError("turbo conflicts with sampling_profile")
+    config["sampling_profile"] = profile_id
+    config["turbo"] = profile["turbo"]
+    resolution_id, _ = resolve_resolution(config["resolution"])
+    config["resolution"] = resolution_id
     if "steps" not in supplied:
-        config["steps"] = TURBO_STEPS if config["turbo"] else BASE_STEPS
+        config["steps"] = profile["steps"]["default"]
     if "sampler" not in supplied:
-        config["sampler"] = TURBO_SAMPLER if config["turbo"] else BASE_SAMPLER
+        config["sampler"] = profile["sampler"]
     if "scheduler" not in supplied:
-        config["scheduler"] = TURBO_SCHEDULER if config["turbo"] else BASE_SCHEDULER
+        config["scheduler"] = profile["scheduler"]
     for field in ("width", "height", "steps"):
         if isinstance(config[field], bool) or not isinstance(config[field], int):
             raise ValueError(f"{field} must be an integer")
@@ -125,6 +167,7 @@ def parse_config(prompt: str, raw: str | None) -> dict:
         raise ValueError("ref_image_size must be 'match' or 'max'")
     if not isinstance(config["references"], list):
         raise ValueError("references must be a JSON array")
+    config["loras"] = resolve_lora_strengths(config["loras"])
 
     validate_generation(
         prompt=prompt,
@@ -139,7 +182,8 @@ def parse_config(prompt: str, raw: str | None) -> dict:
                 "scheduler",
             )
         },
-        turbo=config["turbo"],
+        sampling_profile=config["sampling_profile"],
+        resolution=config["resolution"],
     )
     return config
 
@@ -401,8 +445,8 @@ def _resolve_frame_geometry(
     if not populated:
         if source is not None:
             raise ValueError("geometry_source requires a matching uploaded frame")
-        if (config["width"], config["height"]) not in NATIVE_CANVASES:
-            raise ValueError("canvas must be 864x480 (16:9) or 480x864 (9:16)")
+        if (config["width"], config["height"]) not in NATIVE_CANVASES[config["resolution"]]:
+            raise ValueError(f"canvas does not match the {config['resolution']} native presets")
         return config
     if source is None:
         source = populated[0]
@@ -418,7 +462,7 @@ def _resolve_frame_geometry(
             raise ValueError(
                 f"{name} aspect ratio does not match {source}; crop it before submission"
             )
-    width, height = native_canvas(*source_dimensions)
+    width, height = native_canvas(*source_dimensions, config["resolution"])
     resolved = {**config, "width": width, "height": height, "geometry_source": source}
     validate_generation(
         prompt="geometry validation",
@@ -428,7 +472,8 @@ def _resolve_frame_geometry(
                 "width", "height", "duration_seconds", "steps", "sampler", "scheduler"
             )
         },
-        turbo=resolved["turbo"],
+        sampling_profile=resolved["sampling_profile"],
+        resolution=resolved["resolution"],
     )
     return resolved
 
@@ -601,6 +646,14 @@ def create_gateway(
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         reload()
+        migrated = False
+        for record in favorites.list_favorites(username, root):
+            try:
+                migrated = favorites.migrate_legacy_video(username, record["id"], root) or migrated
+            except (json.JSONDecodeError, ValueError):
+                continue
+        if migrated:
+            commit()
         return {"username": username, "jobs": favorites.list_favorites(username, root)}
 
     @api.put("/api/cloud-sync/{username}/favorites/{job_id}")
@@ -613,14 +666,18 @@ def create_gateway(
 
         reload()
         durable = jobs.read_job(job_id, root=root)
-        if (
-            durable is None
-            or durable.get("status") != "completed"
-            or not jobs.video_path(job_id, root).is_file()
-        ):
-            raise HTTPException(status_code=409, detail="only completed jobs can be favorited")
+        durable_video = jobs.video_path(job_id, root)
+        durable_completed = (
+            durable is not None
+            and durable.get("status") == "completed"
+            and durable_video.is_file()
+        )
 
-        form = await request.form(max_files=12, max_fields=16, max_part_size=1024 * 1024)
+        form = await request.form(
+            max_files=MAX_REFERENCE_SOURCES + 1,
+            max_fields=16,
+            max_part_size=MAX_VIDEO_BYTES,
+        )
         job_value = form.get("job")
         assets_value = form.get("assets")
         if not isinstance(job_value, str) or not isinstance(assets_value, str):
@@ -628,6 +685,7 @@ def create_gateway(
             raise HTTPException(status_code=422, detail="job and assets JSON are required")
 
         temporary_paths: list[Path] = []
+        temporary_video: Path | None = None
         try:
             client_job = json.loads(job_value)
             asset_declarations = json.loads(assets_value)
@@ -635,6 +693,27 @@ def create_gateway(
                 raise ValueError("job must be an object and assets must be an array")
             if len(asset_declarations) > MAX_REFERENCE_SOURCES:
                 raise ValueError(f"favorites accept at most {MAX_REFERENCE_SOURCES} source assets")
+
+            favorite_video = favorites.video_path(username, job_id, root)
+            video_upload = form.get("video")
+            if video_upload is not None and getattr(video_upload, "filename", ""):
+                if _content_type(video_upload) != "video/mp4":
+                    raise ValueError("favorite video must be an MP4")
+                temporary_video = favorite_video.with_name(
+                    f".{favorite_video.name}.{uuid.uuid4().hex}.tmp"
+                )
+                await _stage_upload(video_upload, temporary_video, MAX_VIDEO_BYTES)
+            elif not favorite_video.is_file() and durable_completed:
+                temporary_video = favorite_video.with_name(
+                    f".{favorite_video.name}.{uuid.uuid4().hex}.tmp"
+                )
+                temporary_video.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(durable_video, temporary_video)
+            elif not favorite_video.is_file():
+                raise HTTPException(
+                    status_code=409,
+                    detail="favorite video upload is required after temporary job cleanup",
+                )
 
             client_ids = client_job.get("inputAssetIds") or []
             if not isinstance(client_ids, list) or any(not isinstance(value, str) for value in client_ids):
@@ -687,21 +766,35 @@ def create_gateway(
 
             allowed_client_fields = {
                 "createdAt", "updatedAt", "aspect", "displayAspect", "inputAssetIds",
+                "finishedAt", "samplingStartedAt",
                 "firstFrameId", "lastFrameId", "referenceIds", "batchId", "batchIndex", "batchSize",
             }
-            request_data = durable.get("request") or {}
-            result_data = durable.get("result") if isinstance(durable.get("result"), dict) else {}
+            request_data = (durable or {}).get("request") or {}
+            client_metadata = client_job.get("metadata")
+            result_data = (durable or {}).get("result")
+            if not isinstance(result_data, dict):
+                result_data = client_metadata if isinstance(client_metadata, dict) else {}
             favorite_record = {
                 key: value for key, value in client_job.items() if key in allowed_client_fields
             }
             favorite_record.update({
                 "id": job_id,
-                "mode": request_data.get("mode", "frames"),
-                "prompt": request_data.get("prompt", ""),
+                "mode": request_data.get("mode", client_job.get("mode", "frames")),
+                "prompt": request_data.get("prompt", client_job.get("prompt", "")),
                 "status": "completed",
-                "duration": request_data.get("duration_seconds", 5),
-                "turbo": request_data.get("turbo", True),
-                "contentUrl": f"/api/jobs/{job_id}/video",
+                "duration": request_data.get("duration_seconds", client_job.get("duration", 5)),
+                "turbo": request_data.get("turbo", client_job.get("turbo", True)),
+                "samplingProfile": request_data.get(
+                    "sampling_profile",
+                    client_job.get(
+                        "samplingProfile",
+                        "turbo_4" if request_data.get("turbo", True) else "spectrum",
+                    ),
+                ),
+                "seed": request_data.get("seed", client_job.get("seed")),
+                "resolution": request_data.get("resolution", client_job.get("resolution", "480p")),
+                "loras": _lora_strengths_from_metadata(result_data),
+                "contentUrl": favorites.video_url(username, job_id),
                 "metadata": result_data,
                 "hearted": True,
                 "favoriteAssets": sanitized_assets,
@@ -716,6 +809,9 @@ def create_gateway(
                 destination = favorites.asset_path(username, asset["id"], root)
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 temporary.replace(destination)
+            if temporary_video is not None:
+                favorite_video.parent.mkdir(parents=True, exist_ok=True)
+                temporary_video.replace(favorite_video)
             favorites.write_favorite(username, favorite_record, root)
             favorites.remove_unreferenced(username, previous_ids, root)
             commit()
@@ -723,7 +819,15 @@ def create_gateway(
         except (json.JSONDecodeError, ValueError) as exc:
             for temporary in temporary_paths:
                 temporary.unlink(missing_ok=True)
+            if temporary_video is not None:
+                temporary_video.unlink(missing_ok=True)
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except HTTPException:
+            for temporary in temporary_paths:
+                temporary.unlink(missing_ok=True)
+            if temporary_video is not None:
+                temporary_video.unlink(missing_ok=True)
+            raise
         finally:
             await _close_form_uploads(form)
 
@@ -738,6 +842,26 @@ def create_gateway(
             raise HTTPException(status_code=404, detail="favorite not found") from exc
         commit()
         return Response(status_code=204)
+
+    @api.get("/api/cloud-sync/{username}/favorites/{job_id}/video")
+    def get_favorite_video(username: str, job_id: str):
+        try:
+            username = favorites.normalize_username(username)
+            jobs.validate_job_id(job_id)
+            reload()
+            migrated = favorites.migrate_legacy_video(username, job_id, root)
+            path = favorites.video_path(username, job_id, root)
+        except (json.JSONDecodeError, ValueError) as exc:
+            raise HTTPException(status_code=404, detail="favorite video not found") from exc
+        if migrated:
+            commit()
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="favorite video not found")
+        return FileResponse(
+            path,
+            media_type="video/mp4",
+            headers={"Accept-Ranges": "bytes", "Cache-Control": "private, max-age=3600"},
+        )
 
     @api.get("/api/cloud-sync/{username}/assets/{asset_id}")
     def get_favorite_asset(username: str, asset_id: str):
@@ -796,8 +920,8 @@ def create_gateway(
                     raise ValueError("references mode does not accept first_frame or last_frame")
                 if config["geometry_source"] is not None:
                     raise ValueError("geometry_source is valid only in frames mode")
-                if (config["width"], config["height"]) not in NATIVE_CANVASES:
-                    raise ValueError("canvas must be 864x480 (16:9) or 480x864 (9:16)")
+                if (config["width"], config["height"]) not in NATIVE_CANVASES[config["resolution"]]:
+                    raise ValueError(f"canvas does not match the {config['resolution']} native presets")
                 staged_references, public_references = await _stage_references(
                     form=form,
                     config=config,
@@ -908,6 +1032,24 @@ def create_gateway(
             headers={"Accept-Ranges": "bytes", "Cache-Control": "private, max-age=3600"},
         )
 
+    @api.post("/api/jobs/{job_id}/acknowledge", status_code=204)
+    def acknowledge_job(job_id: str):
+        """Release a completed temporary result after the browser caches it."""
+        try:
+            jobs.validate_job_id(job_id)
+            reload()
+            record = jobs.read_job(job_id, root=root)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="job not found") from exc
+        if record is None:
+            return Response(status_code=204)
+        if record["status"] != "completed":
+            raise HTTPException(status_code=409, detail="only completed jobs can be acknowledged")
+        jobs.delete_job_artifacts(job_id, root=root)
+        delete_progress(job_id)
+        commit()
+        return Response(status_code=204)
+
     @api.delete("/api/jobs/{job_id}", status_code=204)
     def delete_job(job_id: str):
         try:
@@ -917,7 +1059,11 @@ def create_gateway(
         except ValueError as exc:
             raise HTTPException(status_code=404, detail="job not found") from exc
         if record is None:
-            raise HTTPException(status_code=404, detail="job not found")
+            favorites.delete_job_favorites(job_id, root)
+            jobs.delete_job_artifacts(job_id, root=root)
+            delete_progress(job_id)
+            commit()
+            return Response(status_code=204)
         jobs.mark_deleted(job_id, root=root)
         call_id = record.get("call_id") or jobs.read_call_id(job_id, root)
         # Cancellation is latency-sensitive: do it before either durable

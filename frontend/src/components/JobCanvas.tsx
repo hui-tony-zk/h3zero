@@ -1,9 +1,12 @@
-import { AlertCircle, ArrowDownToLine, Expand, Film, Heart, LoaderCircle, Trash2, X } from "lucide-react";
+import { AlertCircle, ArrowDownToLine, Film, Heart, LoaderCircle, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
-import { useEffect, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import { groupJobs } from "../lib/jobs";
+import { profileLabel } from "../lib/sampling";
+import { useGeneratedVideoUrl } from "../hooks/useGeneratedVideoUrl";
 import type { Job } from "../types";
 import { RemixIcon } from "./icons";
+import { GenerationSettingsDialog } from "./GenerationSettingsDialog";
 
 function isActive(job: Job) {
   return job.status === "uploading" || job.status === "queued" || job.status === "running";
@@ -27,11 +30,21 @@ function batchStartPadding(job: Job) {
   return `max(1rem, calc(50% - max(130px, min(26dvh, 280px, ${halfWidthLimitedHeight}vw))))`;
 }
 
-function JobVideo({ job }: { job: Job }) {
-  return <video src={job.contentUrl} autoPlay loop muted playsInline preload="auto" className="absolute inset-0 size-full bg-black object-contain" />;
+type PlaybackReady = (video: HTMLVideoElement) => void;
+
+function showVideoThumbnail(video: HTMLVideoElement) {
+  video.pause();
+  if (video.readyState >= 1) video.currentTime = 0;
 }
 
-function FullscreenVideo({ job, onClose }: { job: Job; onClose: () => void }) {
+function JobVideo({ job, autoplayEnabled, onPlaybackReady }: { job: Job; autoplayEnabled: boolean; onPlaybackReady: PlaybackReady }) {
+  const videoUrl = useGeneratedVideoUrl(job);
+  const isLocal = videoUrl?.startsWith("blob:") === true;
+  return videoUrl ? <video data-h3-autoplay-video src={videoUrl} autoPlay={autoplayEnabled} loop muted playsInline preload={autoplayEnabled || isLocal ? "auto" : "metadata"} onLoadedMetadata={(event) => onPlaybackReady(event.currentTarget)} className="absolute inset-0 size-full bg-black object-contain" /> : null;
+}
+
+function FullscreenVideo({ job, autoplayEnabled, onPlaybackReady, onClose }: { job: Job; autoplayEnabled: boolean; onPlaybackReady: PlaybackReady; onClose: () => void }) {
+  const videoUrl = useGeneratedVideoUrl(job);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
@@ -42,27 +55,33 @@ function FullscreenVideo({ job, onClose }: { job: Job; onClose: () => void }) {
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-70 flex items-center justify-center bg-black/94 p-4 backdrop-blur-xl sm:p-8" role="dialog" aria-modal="true" aria-label="Video viewer">
-      <video src={job.contentUrl} autoPlay loop controls playsInline className="max-h-full max-w-full object-contain" />
+      {videoUrl && <video data-h3-autoplay-video src={videoUrl} autoPlay={autoplayEnabled} loop controls playsInline onLoadedMetadata={(event) => onPlaybackReady(event.currentTarget)} className="max-h-full max-w-full object-contain" />}
       <div className="fixed right-4 top-4 flex gap-2 sm:right-6 sm:top-6">
-        <a href={job.contentUrl} download={`h3-${job.id}.mp4`} className="flex size-10 items-center justify-center rounded-full border border-white/12 bg-black/60 text-white/80 backdrop-blur-md hover:bg-white/10 hover:text-white" aria-label="Download video" title="Download"><ArrowDownToLine size={16} /></a>
+        {videoUrl && <a href={videoUrl} download={`h3-${job.id}.mp4`} className="flex size-10 items-center justify-center rounded-full border border-white/12 bg-black/60 text-white/80 backdrop-blur-md hover:bg-white/10 hover:text-white" aria-label="Download video" title="Download"><ArrowDownToLine size={16} /></a>}
         <button type="button" onClick={onClose} className="flex size-10 items-center justify-center rounded-full border border-white/12 bg-black/60 text-white/80 backdrop-blur-md hover:bg-white/10 hover:text-white" aria-label="Close video viewer"><X size={17} /></button>
       </div>
     </motion.div>
   );
 }
 
-function JobCard({ job, favoritePending, onFavorite, onRemix, onDelete, onCancel, onView }: {
+function JobCard({ job, autoplayEnabled, onPlaybackReady, favoritePending, onFavorite, onRemix, onDelete, onCancel, onView, onSettings }: {
   job: Job;
+  autoplayEnabled: boolean;
+  onPlaybackReady: PlaybackReady;
   favoritePending: boolean;
   onFavorite: () => void;
   onRemix: () => void;
   onDelete: () => void;
   onCancel: () => void;
   onView: () => void;
+  onSettings: () => void;
 }) {
   const active = isActive(job);
   const failed = job.status === "failed" || job.status === "expired" || job.status === "cancelled";
   const progress = job.progress?.percent;
+  const samplingProfile = job.metadata?.sampling_profile ?? job.samplingProfile ?? (job.turbo ? "turbo_4" : "spectrum");
+  const accelerated = samplingProfile !== "base";
+  const samplingLabel = profileLabel(samplingProfile);
   const ratio = aspectNumber(job);
   const style = {
     "--job-aspect": ratio,
@@ -82,13 +101,20 @@ function JobCard({ job, favoritePending, onFavorite, onRemix, onDelete, onCancel
       style={style}
     >
       {job.status === "completed" && job.contentUrl ? (
-        <button type="button" onClick={(event) => { event.stopPropagation(); onView(); }} className="absolute inset-0 size-full cursor-zoom-in" aria-label="Open video fullscreen"><JobVideo job={job} /></button>
+        <button type="button" onClick={(event) => { event.stopPropagation(); onView(); }} className="absolute inset-0 size-full cursor-zoom-in" aria-label="Open video fullscreen"><JobVideo job={job} autoplayEnabled={autoplayEnabled} onPlaybackReady={onPlaybackReady} /></button>
       ) : (
         <div className="absolute inset-0 flex items-center justify-center overflow-hidden bg-[#151515]">
           <div className="absolute inset-0 opacity-70 [background:radial-gradient(circle_at_20%_10%,rgba(68,170,255,.17),transparent_42%),linear-gradient(145deg,rgba(255,255,255,.025),transparent)]" />
           {active ? <LoaderCircle size={24} className="relative animate-spin text-reelo-accent" /> : <AlertCircle size={22} className="relative text-white/24" />}
         </div>
       )}
+
+      <span
+        className={`pointer-events-none absolute left-3 top-3 rounded-full border px-2 py-1 text-[9px] font-bold uppercase tracking-[0.14em] backdrop-blur-md ${accelerated ? "border-reelo-accent/35 bg-black/62 text-reelo-accent" : "border-white/12 bg-black/62 text-white/65"}`}
+        title={`Sampling profile: ${samplingLabel}`}
+      >
+        {samplingLabel}
+      </span>
 
       {job.status === "completed" && <button
         type="button"
@@ -111,23 +137,42 @@ function JobCard({ job, favoritePending, onFavorite, onRemix, onDelete, onCancel
             </div>
             {progress !== undefined && <span className="text-[10px] font-bold tabular-nums text-white/65">{Math.round(progress * 100)}%</span>}
           </div>
-          <div className="mt-3 h-0.5 overflow-hidden rounded-full bg-white/10">
-            {progress !== undefined ? <motion.div className="h-full bg-reelo-accent" animate={{ width: `${progress * 100}%` }} transition={{ ease: "easeOut", duration: 0.25 }} /> : active ? <motion.div className="h-full w-1/3 bg-reelo-accent" animate={{ x: ["-100%", "300%"] }} transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }} /> : null}
-          </div>
+          {progress !== undefined && <div className="mt-3 h-0.5 overflow-hidden rounded-full bg-white/10">
+            <motion.div className="h-full bg-reelo-accent" initial={false} animate={{ width: `${progress * 100}%` }} transition={{ ease: "easeOut", duration: 0.25 }} />
+          </div>}
         </div>
       )}
 
-      {job.status !== "uploading" && <div className="absolute bottom-3 right-3 flex gap-1.5">
+      {job.status !== "uploading" && <div className="absolute bottom-3 right-3 flex gap-1.5 sm:pointer-events-none sm:translate-y-1 sm:opacity-0 sm:transition-[opacity,transform] sm:duration-150 sm:group-hover:pointer-events-auto sm:group-hover:translate-y-0 sm:group-hover:opacity-100 sm:group-focus-within:pointer-events-auto sm:group-focus-within:translate-y-0 sm:group-focus-within:opacity-100">
+        <button type="button" onClick={(event) => { event.stopPropagation(); onSettings(); }} className="flex size-8 items-center justify-center rounded-full border border-white/12 bg-black/62 text-white/75 backdrop-blur-md hover:bg-black hover:text-white" aria-label="Show generation settings" title="Generation settings"><SlidersHorizontal size={13} /></button>
         <button type="button" onClick={(event) => { event.stopPropagation(); onRemix(); }} className="flex size-8 items-center justify-center rounded-full border border-white/12 bg-black/62 text-white/75 backdrop-blur-md hover:bg-black hover:text-white" aria-label="Remix this job" title="Remix"><RemixIcon size={13} /></button>
-        {job.status === "completed" && <button type="button" onClick={(event) => { event.stopPropagation(); onView(); }} className="flex size-8 items-center justify-center rounded-full border border-white/12 bg-black/62 text-white/75 backdrop-blur-md hover:bg-black hover:text-white" aria-label="Open video fullscreen" title="Fullscreen"><Expand size={13} /></button>}
         <button type="button" onClick={(event) => { event.stopPropagation(); if (active) onCancel(); else onDelete(); }} className="flex size-8 items-center justify-center rounded-full border border-white/12 bg-black/62 text-white/75 backdrop-blur-md hover:bg-red-500 hover:text-white" aria-label={active ? "Cancel job" : "Delete job"} title={active ? "Cancel job" : "Delete"}><Trash2 size={13} /></button>
       </div>}
     </motion.article>
   );
 }
 
-export function JobCanvas({ jobs, favoritePendingIds, onFavorite, onRemix, onDelete, onCancel }: { jobs: Job[]; favoritePendingIds: Set<string>; onFavorite: (job: Job) => void; onRemix: (job: Job) => void; onDelete: (job: Job) => void; onCancel: (job: Job) => void }) {
+export function JobCanvas({ jobs, autoplayEnabled, favoritePendingIds, onFavorite, onRemix, onDelete, onCancel }: { jobs: Job[]; autoplayEnabled: boolean; favoritePendingIds: Set<string>; onFavorite: (job: Job) => void; onRemix: (job: Job) => void; onDelete: (job: Job) => void; onCancel: (job: Job) => void }) {
   const [viewer, setViewer] = useState<Job | null>(null);
+  const [settingsJob, setSettingsJob] = useState<Job | null>(null);
+
+  const applyAutoplay = useCallback((video: HTMLVideoElement) => {
+    if (!autoplayEnabled) {
+      showVideoThumbnail(video);
+      return;
+    }
+    void video.play().catch(() => undefined);
+  }, [autoplayEnabled]);
+
+  useEffect(() => {
+    const videos = Array.from(document.querySelectorAll<HTMLVideoElement>("[data-h3-autoplay-video]"));
+    if (!autoplayEnabled) {
+      videos.forEach(showVideoThumbnail);
+      return;
+    }
+
+    videos.forEach((video) => { void video.play().catch(() => undefined); });
+  }, [autoplayEnabled]);
 
   if (!jobs.length) {
     return (
@@ -149,12 +194,13 @@ export function JobCanvas({ jobs, favoritePendingIds, onFavorite, onRemix, onDel
         <div className="flex h-full w-full gap-3 overflow-x-auto px-[9vw] [scrollbar-color:rgba(255,255,255,0.22)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb:hover]:bg-white/40 [&::-webkit-scrollbar-track]:mx-[12vw] [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-track]:bg-white/[0.045] sm:gap-5 sm:px-[12vw]" aria-label="Video batches">
           {batches.map((batch) => <section key={batch.id} aria-label="Generation batch" className="h-full shrink-0 overflow-y-auto overscroll-y-contain [scrollbar-color:rgba(255,255,255,0.16)_transparent] [scrollbar-width:thin]">
             <div style={batch.jobs.length > 1 ? { paddingTop: batchStartPadding(batch.jobs[0]) } : undefined} className={`flex min-h-full flex-col items-center gap-3 pb-4 sm:gap-5 ${batch.jobs.length === 1 ? "justify-center pt-4" : "justify-start"}`}>
-              {batch.jobs.map((job) => <JobCard key={job.id} job={job} favoritePending={favoritePendingIds.has(job.id)} onFavorite={() => onFavorite(job)} onRemix={() => onRemix(job)} onDelete={() => onDelete(job)} onCancel={() => onCancel(job)} onView={() => setViewer(job)} />)}
+              {batch.jobs.map((job) => <JobCard key={job.id} job={job} autoplayEnabled={autoplayEnabled} onPlaybackReady={applyAutoplay} favoritePending={favoritePendingIds.has(job.id)} onFavorite={() => onFavorite(job)} onRemix={() => onRemix(job)} onDelete={() => onDelete(job)} onCancel={() => onCancel(job)} onView={() => setViewer(job)} onSettings={() => setSettingsJob(job)} />)}
             </div>
           </section>)}
         </div>
       </main>
-      <AnimatePresence>{viewer && <FullscreenVideo job={viewer} onClose={() => setViewer(null)} />}</AnimatePresence>
+      <AnimatePresence>{viewer && <FullscreenVideo job={viewer} autoplayEnabled={autoplayEnabled} onPlaybackReady={applyAutoplay} onClose={() => setViewer(null)} />}</AnimatePresence>
+      <AnimatePresence>{settingsJob && <GenerationSettingsDialog job={settingsJob} onClose={() => setSettingsJob(null)} />}</AnimatePresence>
     </>
   );
 }

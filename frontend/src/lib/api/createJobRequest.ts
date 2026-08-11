@@ -1,4 +1,5 @@
 import type { ComposerDraft, FramesDraft, H3Specs, MediaAsset } from "../../types";
+import { isTurboProfile, samplingProfileId } from "../sampling";
 
 function frameGeometry(draft: FramesDraft, specs: H3Specs) {
   const entries = ([
@@ -8,7 +9,9 @@ function frameGeometry(draft: FramesDraft, specs: H3Specs) {
   const source = entries.sort((left, right) => left.asset.createdAt - right.asset.createdAt)[0];
   if (!source?.asset.width || !source.asset.height) return null;
   const ratio = source.asset.width / source.asset.height;
-  const { base_short_edge: shortEdge, max_pixels: maxPixels, multiple } = specs.output.geometry;
+  const resolution = "480p" as const;
+  const { short_edge: shortEdge, max_pixels: maxPixels } = specs.output.geometry.resolutions[resolution];
+  const { multiple } = specs.output.geometry;
   let width = ratio >= 1 ? ratio * shortEdge : shortEdge;
   let height = ratio >= 1 ? shortEdge : shortEdge / ratio;
   const pixels = width * height;
@@ -27,7 +30,8 @@ function frameGeometry(draft: FramesDraft, specs: H3Specs) {
 }
 
 export function buildCreateJobRequest(draft: ComposerDraft, specs: H3Specs) {
-  const preset = specs.output.geometry.native_aspects.find((candidate) => candidate.id === draft.aspect);
+  const resolution = "480p" as const;
+  const preset = specs.output.geometry.resolutions[resolution].native_aspects.find((candidate) => candidate.id === draft.aspect);
   if (!preset) throw new Error(`The H3 API does not support aspect ${draft.aspect}.`);
   const frame = draft.mode === "frames" ? frameGeometry(draft, specs) : null;
   const references = draft.mode === "references" ? draft.references.map((asset, index) => ({
@@ -37,17 +41,27 @@ export function buildCreateJobRequest(draft: ComposerDraft, specs: H3Specs) {
     field: `attachment_${index}`,
   })) : [];
   const body = new FormData();
-  const sampling = specs.output.sampling.profiles[draft.turbo ? "turbo" : "base"];
+  const profileId = samplingProfileId(draft);
+  const sampling = specs.output.sampling.profiles[profileId];
+  const loras = Object.fromEntries(specs.output.loras.flatMap((lora) => {
+    const configured = draft.loras?.[lora.id];
+    const strength = configured ?? (lora.default_enabled ? lora.default_strength : 0);
+    return strength > 0 ? [[lora.id, strength]] : [];
+  }));
   body.set("prompt", draft.prompt.trim());
   body.set("config", JSON.stringify({
     mode: draft.mode,
     width: frame?.width ?? preset.width,
     height: frame?.height ?? preset.height,
     duration_seconds: draft.duration,
-    turbo: draft.turbo,
+    resolution,
+    sampling_profile: profileId,
+    turbo: isTurboProfile(profileId),
+    seed: null,
     steps: sampling.steps.default,
     sampler: sampling.sampler,
     scheduler: sampling.scheduler,
+    loras,
     geometry_source: frame?.geometrySource,
     references: draft.mode === "references" ? references : undefined,
   }));

@@ -16,15 +16,8 @@ from minimax_h3.config import (
     PROGRESS_DICT_NAME,
     WEB_APP_NAME,
 )
-from minimax_h3.workflow import (
-    BASE_SAMPLER,
-    BASE_SCHEDULER,
-    BASE_STEPS,
-    TURBO_SAMPLER,
-    TURBO_SCHEDULER,
-    TURBO_STEPS,
-    validate_image_bytes,
-)
+from minimax_h3.specs import resolve_sampling_profile
+from minimax_h3.workflow import validate_image_bytes
 from modal_services import jobs
 
 
@@ -53,8 +46,46 @@ app = modal.App(WEB_APP_NAME)
     image=web_image,
     volumes={jobs.OUTPUT_ROOT: output_volume},
     timeout=15 * 60,
-    scaledown_window=2,
-    max_containers=1,
+    schedule=modal.Period(hours=6),
+)
+def maintain_outputs():
+    """Migrate legacy favorites before pruning temporary job storage."""
+    from modal_services import favorites
+
+    output_volume.reload()
+    migration = favorites.migrate_legacy_videos()
+    # Make favorite-owned copies durable before deleting any legacy job video.
+    output_volume.commit()
+
+    cleanup = jobs.cleanup_stale_jobs()
+    live_job_ids = set()
+    jobs_directory = Path(jobs.OUTPUT_ROOT) / "jobs"
+    if jobs_directory.is_dir():
+        live_job_ids = {path.stem for path in jobs_directory.glob("*.json")}
+    removed_progress = 0
+    try:
+        for key in list(progress_store.keys()):
+            if isinstance(key, str) and key not in live_job_ids:
+                progress_store.pop(key)
+                removed_progress += 1
+    except Exception as exc:
+        print(f"Could not finish progress cleanup: {exc}", flush=True)
+    output_volume.commit()
+    result = {
+        "migration": migration,
+        "cleanup": cleanup,
+        "removed_progress": removed_progress,
+    }
+    print(f"H3 output maintenance: {result}", flush=True)
+    return result
+
+
+@app.function(
+    image=web_image,
+    volumes={jobs.OUTPUT_ROOT: output_volume},
+    timeout=15 * 60,
+    scaledown_window=15,
+    max_containers=2,
 )
 @modal.asgi_app()
 def web():
@@ -89,7 +120,9 @@ def main(
     height: int = 480,
     duration_seconds: float = 5,
     seed: int = -1,
+    resolution: str = "480p",
     turbo: bool = True,
+    sampling_profile: str = "",
     steps: int = 0,
     sampler: str = "",
     scheduler: str = "",
@@ -97,6 +130,10 @@ def main(
     last_frame: str = "",
 ) -> None:
     """Call the separately deployed worker and save the returned MP4 locally."""
+    profile_id, profile = resolve_sampling_profile(
+        sampling_profile or None,
+        turbo=turbo,
+    )
     service = modal.Cls.from_name(GPU_APP_NAME, "H3Service")()
     result = service.generate.remote(
         prompt=prompt,
@@ -104,10 +141,12 @@ def main(
         height=height,
         duration_seconds=duration_seconds,
         seed=None if seed < 0 else seed,
-        turbo=turbo,
-        steps=steps or (TURBO_STEPS if turbo else BASE_STEPS),
-        sampler=sampler or (TURBO_SAMPLER if turbo else BASE_SAMPLER),
-        scheduler=scheduler or (TURBO_SCHEDULER if turbo else BASE_SCHEDULER),
+        resolution=resolution,
+        turbo=profile["turbo"],
+        sampling_profile=profile_id,
+        steps=steps or profile["steps"]["default"],
+        sampler=sampler or profile["sampler"],
+        scheduler=scheduler or profile["scheduler"],
         first_frame=_read_keyframe(first_frame, "first"),
         last_frame=_read_keyframe(last_frame, "last"),
     )

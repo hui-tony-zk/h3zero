@@ -12,9 +12,20 @@ import { useJobs } from "./hooks/useJobs";
 import { createJob, deleteFavorite, deleteJob, getFavorites, getSpecs, putFavorite } from "./lib/api/client";
 import { loadAsset } from "./lib/assets";
 import { describeFavoriteAssets } from "./lib/favorites";
+import { loadGeneratedVideoBlob, removeGeneratedVideo } from "./lib/generatedVideos";
 import { readCloudSyncUsername, writeCloudSyncUsername } from "./lib/cloudSync";
 import { pendingJob, uploadingJob } from "./lib/jobs";
 import type { H3Specs, Job } from "./types";
+
+const AUTOPLAY_STORAGE_KEY = "h3zero:autoplay";
+
+function readAutoplayPreference() {
+  try {
+    return window.localStorage.getItem(AUTOPLAY_STORAGE_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
 
 export default function App() {
   const { jobs, addJobs, updateJob, replaceJob, removeJob, syncFavorites } = useJobs();
@@ -29,6 +40,7 @@ export default function App() {
   const [favoritePendingIds, setFavoritePendingIds] = useState<Set<string>>(() => new Set());
   const [cloudSyncUsername, setCloudSyncUsername] = useState<string | null>(readCloudSyncUsername);
   const [cloudSyncOpen, setCloudSyncOpen] = useState(false);
+  const [autoplayEnabled, setAutoplayEnabled] = useState(readAutoplayPreference);
   const pendingDeleteRef = useRef<{ job: Job; timer: number } | null>(null);
   const pendingFavoriteRef = useRef<Job | null>(null);
 
@@ -88,13 +100,15 @@ export default function App() {
   const finalizeDelete = useCallback((job: Job) => {
     removeJob(job.id);
     if (job.id.startsWith("upload:")) return;
-    void deleteJob(job.id).catch((error) => {
-      addJobs([job]);
-      setToast((current) => current?.id.startsWith("delete:") ? current : {
-        id: `delete-error:${job.id}:${Date.now()}`,
-        message: error instanceof Error ? "Could not delete result" : "Delete failed",
+    void deleteJob(job.id)
+      .then(() => { void removeGeneratedVideo(job.id).catch(() => undefined); })
+      .catch((error) => {
+        addJobs([job]);
+        setToast((current) => current?.id.startsWith("delete:") ? current : {
+          id: `delete-error:${job.id}:${Date.now()}`,
+          message: error instanceof Error ? "Could not delete result" : "Delete failed",
+        });
       });
-    });
   }, [addJobs, removeJob]);
 
   const undoDelete = useCallback(() => {
@@ -150,8 +164,9 @@ export default function App() {
         const uniqueIds = [...new Set(job.inputAssetIds)];
         const sources = (await Promise.all(uniqueIds.map(loadAsset))).filter((asset) => asset !== null);
         const manifest = describeFavoriteAssets(job, sources);
+        const video = await loadGeneratedVideoBlob(job.id);
         updateJob(job.id, { favoriteAssets: manifest });
-        const saved = await putFavorite(username, { ...job, hearted: true, favoriteAssets: manifest }, sources, manifest);
+        const saved = await putFavorite(username, { ...job, hearted: true, favoriteAssets: manifest }, sources, manifest, video);
         updateJob(job.id, { hearted: true, favoriteAssets: saved.favoriteAssets });
       } else {
         await deleteFavorite(username, job.id);
@@ -192,6 +207,17 @@ export default function App() {
     pendingFavoriteRef.current = null;
     setCloudSyncOpen(false);
   }, []);
+  const toggleAutoplay = useCallback(() => {
+    setAutoplayEnabled((current) => {
+      const next = !current;
+      try {
+        window.localStorage.setItem(AUTOPLAY_STORAGE_KEY, next ? "on" : "off");
+      } catch {
+        // Playback still works when storage is unavailable.
+      }
+      return next;
+    });
+  }, []);
   const remix = useCallback(async (job: Job) => {
     try {
       await drafts.restoreInputs(job);
@@ -216,15 +242,35 @@ export default function App() {
       <div className="text-[11px] font-bold tracking-[0.16em] text-white/82" aria-label="H3Zero">
         H3<span className="text-reelo-accent">Zero</span>
       </div>
-      <button type="button" onClick={() => { pendingFavoriteRef.current = null; setCloudSyncOpen(true); }} className="pointer-events-auto flex min-h-8 max-w-[65vw] items-center gap-1.5 rounded-full px-2.5 text-[10px] font-medium text-white/56 transition hover:bg-white/6 hover:text-white" title={cloudSyncUsername ? "Change Modal cloud sync name" : "Set up Modal cloud sync"}>
-        <Cloud size={12} className={cloudSyncUsername ? "text-reelo-accent" : ""} />
-        <span className="truncate">{cloudSyncUsername ? `Synced as: ${cloudSyncUsername}` : "Modal cloud sync"}</span>
-      </button>
+      <div className="pointer-events-auto flex items-center gap-1.5">
+        <button type="button" onClick={() => { pendingFavoriteRef.current = null; setCloudSyncOpen(true); }} className="flex min-h-8 max-w-[42vw] items-center gap-1.5 rounded-full px-2.5 text-[10px] font-medium text-white/56 transition hover:bg-white/6 hover:text-white" title={cloudSyncUsername ? "Change Modal cloud sync name" : "Set up Modal cloud sync"}>
+          <Cloud size={12} className={cloudSyncUsername ? "text-reelo-accent" : ""} />
+          <span className="hidden truncate sm:inline">{cloudSyncUsername ? `Synced as: ${cloudSyncUsername}` : "Modal cloud sync"}</span>
+        </button>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={autoplayEnabled}
+          aria-label={`Autoplay ${autoplayEnabled ? "on" : "off"}`}
+          onClick={toggleAutoplay}
+          className="group flex min-h-8 items-center gap-2 rounded-full px-2.5 text-[10px] font-semibold text-white/72 transition hover:bg-white/6 hover:text-white"
+          title={autoplayEnabled ? "Show video thumbnails" : "Play all loaded videos"}
+        >
+          <span>Autoplay</span>
+          <span className={`relative h-4 w-7 rounded-full border transition-colors ${autoplayEnabled ? "border-reelo-accent/55 bg-reelo-accent/22" : "border-white/16 bg-white/6"}`} aria-hidden="true">
+            <motion.span
+              className={`absolute left-0 top-[3px] size-2 rounded-full ${autoplayEnabled ? "bg-reelo-accent" : "bg-white/42"}`}
+              animate={{ x: autoplayEnabled ? 15 : 3 }}
+              transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+            />
+          </span>
+        </button>
+      </div>
     </motion.header>
-    <JobCanvas jobs={visibleJobs} favoritePendingIds={favoritePendingIds} onFavorite={requestFavorite} onRemix={(job) => void remix(job)} onDelete={remove} onCancel={cancel} />
+    <JobCanvas jobs={visibleJobs} autoplayEnabled={autoplayEnabled} favoritePendingIds={favoritePendingIds} onFavorite={requestFavorite} onRemix={(job) => void remix(job)} onDelete={remove} onCancel={cancel} />
     <GithubStarPrompt visible={githubStarReminder.visible} onDismiss={githubStarReminder.dismiss} onStar={githubStarReminder.hideForever} />
     {specError && !specs && <p className="fixed inset-x-4 bottom-20 z-50 text-center text-xs text-red-300">{specError}</p>}
-    <CommandBar draft={drafts.activeDraft} specs={specs} open={composerOpen} launching={launching} onOpenChange={setComposerOpen} onModeChange={drafts.setActiveMode} onUpdate={drafts.updateActiveDraft} onSetFrame={drafts.setFrame} onAddReferences={drafts.addReferences} onRemoveReference={drafts.removeReference} onLaunch={launch} />
+    <CommandBar draft={drafts.activeDraft} specs={specs} open={composerOpen} launching={launching} onOpenChange={setComposerOpen} onModeChange={drafts.setActiveMode} onUpdate={drafts.updateActiveDraft} onSetFrame={drafts.setFrame} onAddReferences={drafts.addReferences} onReplaceReference={drafts.replaceReference} onRemoveReference={drafts.removeReference} onLaunch={launch} />
     <CloudSyncDialog open={cloudSyncOpen} currentUsername={cloudSyncUsername} onClose={closeCloudSync} onSubmit={connectCloudSync} />
     <Toast toast={toast} onDismiss={dismissToast} />
   </div>;

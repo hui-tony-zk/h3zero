@@ -5,24 +5,103 @@ from __future__ import annotations
 import copy
 import math
 
+from minimax_h3.loras import public_loras
+
 FPS = 24
 CANVAS_MULTIPLE = 32
 BASE_SHORT_EDGE = 480
-MAX_PIXELS = 480 * 864
-SPEC_VERSION = "1.2"
-BASE_MIN_STEPS = 1
+MAX_PIXELS = 768 * 1344
+SPEC_VERSION = "1.6"
+BASE_MIN_STEPS = 20
 BASE_STEPS = 20
-BASE_MAX_STEPS = 50
+BASE_MAX_STEPS = 20
 BASE_SAMPLER = "res_multistep"
 BASE_SCHEDULER = "simple"
-TURBO_LORA = "minimax_h3_turbo_v4_step600_ema.safetensors"
+TURBO_4_LORA = "minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors"
+TURBO_8_LORA = "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors"
+TURBO_LORA = TURBO_4_LORA
 TURBO_LORA_STRENGTH = 1.0
-TURBO_LOW_VRAM = False
 TURBO_MIN_STEPS = 4
-TURBO_STEPS = 8
-TURBO_MAX_STEPS = 8
-TURBO_SAMPLER = "minimax_h3_turbo"
+TURBO_STEPS = 4
+TURBO_MAX_STEPS = 4
+TURBO_SAMPLER = "res_multistep"
 TURBO_SCHEDULER = "simple"
+DEFAULT_SAMPLING_PROFILE = "turbo_4"
+SAMPLING_PROFILE_IDS = ("turbo_4", "turbo_8", "spectrum", "base")
+PUBLIC_SAMPLING_PROFILE_IDS = SAMPLING_PROFILE_IDS
+SEED_OPTIONS = (None, 42, 106, 99)
+DEFAULT_RESOLUTION = "480p"
+RESOLUTION_IDS = ("480p", "768p")
+
+SAMPLING_PROFILES = {
+    "turbo_4": {
+        "label": "Turbo · 4 steps",
+        "method": "LightX2V MiniMax-H3 Turbo 4-step LoRA",
+        "lora": TURBO_4_LORA,
+        "preview": True,
+        "steps": {"default": 4, "min": 4, "max": 4},
+        "sampler": "res_multistep",
+        "scheduler": "simple",
+        "lora_strength": TURBO_LORA_STRENGTH,
+        "spectrum": False,
+        "turbo": True,
+        "low_vram": None,
+    },
+    "turbo_8": {
+        "label": "8 step LoRA",
+        "method": "LightX2V MiniMax-H3 Turbo 8-step LoRA",
+        "lora": TURBO_8_LORA,
+        "preview": True,
+        "steps": {"default": 8, "min": 8, "max": 8},
+        "sampler": "res_multistep",
+        "scheduler": "simple",
+        "lora_strength": TURBO_LORA_STRENGTH,
+        "spectrum": False,
+        "turbo": True,
+        "low_vram": None,
+    },
+    "spectrum": {
+        "label": "Spectrum · 20 steps",
+        "method": "MiniMax-H3 Base with Spectrum v0.2.5",
+        "lora": None,
+        "preview": True,
+        "steps": {"default": 20, "min": 20, "max": 20},
+        "sampler": "res_multistep",
+        "scheduler": "simple",
+        "lora_strength": None,
+        "spectrum": True,
+        "turbo": False,
+        "low_vram": None,
+    },
+    "base": {
+        "label": "Base 20 steps",
+        "method": "MiniMax-H3 Base",
+        "lora": None,
+        "preview": False,
+        "steps": {"default": 20, "min": 20, "max": 20},
+        "sampler": "res_multistep",
+        "scheduler": "simple",
+        "lora_strength": None,
+        "spectrum": False,
+        "turbo": False,
+        "low_vram": None,
+    },
+}
+
+
+def resolve_sampling_profile(
+    profile_id: str | None = None,
+    *,
+    turbo: bool | None = None,
+) -> tuple[str, dict]:
+    """Resolve a profile while retaining the legacy Turbo boolean fallback."""
+    if profile_id is None:
+        profile_id = "spectrum" if turbo is False else DEFAULT_SAMPLING_PROFILE
+    if not isinstance(profile_id, str) or profile_id not in SAMPLING_PROFILES:
+        raise ValueError(
+            f"sampling_profile must be one of {', '.join(SAMPLING_PROFILE_IDS)}"
+        )
+    return profile_id, SAMPLING_PROFILES[profile_id]
 
 IMAGE_MIME_TYPES = ("image/png", "image/jpeg", "image/webp")
 VIDEO_MIME_TYPES = ("video/mp4", "video/quicktime", "video/webm")
@@ -51,6 +130,21 @@ ASPECT_RATIOS = (
     ("16:9", 16, 9),
 )
 
+RESOLUTION_PROFILES = {
+    "480p": {
+        "label": "480p",
+        "short_edge": 480,
+        "max_pixels": 480 * 864,
+        "recommended": False,
+    },
+    "768p": {
+        "label": "768p (recommended)",
+        "short_edge": 768,
+        "max_pixels": 768 * 1344,
+        "recommended": True,
+    },
+}
+
 
 def aligned_frame_count(duration_seconds: float) -> int:
     """Snap a requested duration upward to H3's 17k+5 frame grid."""
@@ -58,17 +152,31 @@ def aligned_frame_count(duration_seconds: float) -> int:
     return raw_frames + (5 - raw_frames % 17) % 17
 
 
-def native_canvas(width: int, height: int) -> tuple[int, int]:
-    """Resolve an aspect to H3's 480-short-edge, area-capped canvas."""
+def resolve_resolution(resolution: str | None = None) -> tuple[str, dict]:
+    resolution_id = resolution or DEFAULT_RESOLUTION
+    if not isinstance(resolution_id, str) or resolution_id not in RESOLUTION_PROFILES:
+        raise ValueError(f"resolution must be one of {', '.join(RESOLUTION_IDS)}")
+    return resolution_id, RESOLUTION_PROFILES[resolution_id]
+
+
+def native_canvas(
+    width: int,
+    height: int,
+    resolution: str = DEFAULT_RESOLUTION,
+) -> tuple[int, int]:
+    """Resolve an aspect to the selected H3 area-capped canvas."""
     if width <= 0 or height <= 0:
         raise ValueError("source width and height must be positive")
+    _, profile = resolve_resolution(resolution)
+    short_edge = profile["short_edge"]
+    max_pixels = profile["max_pixels"]
     ratio = width / height
     if ratio >= 1.0:
-        nominal_width, nominal_height = BASE_SHORT_EDGE * ratio, BASE_SHORT_EDGE
+        nominal_width, nominal_height = short_edge * ratio, short_edge
     else:
-        nominal_width, nominal_height = BASE_SHORT_EDGE, BASE_SHORT_EDGE / ratio
-    if nominal_width * nominal_height > MAX_PIXELS:
-        scale = math.sqrt(MAX_PIXELS / (nominal_width * nominal_height))
+        nominal_width, nominal_height = short_edge, short_edge / ratio
+    if nominal_width * nominal_height > max_pixels:
+        scale = math.sqrt(max_pixels / (nominal_width * nominal_height))
         nominal_width *= scale
         nominal_height *= scale
     resolved_width = max(
@@ -79,7 +187,7 @@ def native_canvas(width: int, height: int) -> tuple[int, int]:
         CANVAS_MULTIPLE,
         round(nominal_height / CANVAS_MULTIPLE) * CANVAS_MULTIPLE,
     )
-    while resolved_width * resolved_height > MAX_PIXELS:
+    while resolved_width * resolved_height > max_pixels:
         if resolved_width >= resolved_height:
             resolved_width -= CANVAS_MULTIPLE
         else:
@@ -98,12 +206,12 @@ def duration_options() -> list[dict]:
     ]
 
 
-def aspect_presets() -> list[dict]:
+def aspect_presets(resolution: str = DEFAULT_RESOLUTION) -> list[dict]:
     return [
         {
             "id": aspect,
-            "width": native_canvas(width, height)[0],
-            "height": native_canvas(width, height)[1],
+            "width": native_canvas(width, height, resolution)[0],
+            "height": native_canvas(width, height, resolution)[1],
         }
         for aspect, width, height in ASPECT_RATIOS
     ]
@@ -131,8 +239,8 @@ _SPECS = {
         },
         "references": {
             "available": True,
-            "model": "MiniMax-H3 Base Ref2VA",
-            "checkpoint": "minimax_h3_ref2va_int8_convrot.safetensors",
+            "model": "MiniMax-H3 Base FL2VA with reference conditioning",
+            "checkpoint": "minimax_h3_fl2va_int8_convrot.safetensors",
             "order": "upload_order",
             "tags": {
                 "image": "<Picture N>",
@@ -176,38 +284,24 @@ _SPECS = {
     },
     "output": {
         "fps": FPS,
+        "loras": public_loras(),
         "sampling": {
-            "default": "turbo",
+            "default": DEFAULT_SAMPLING_PROFILE,
             "profiles": {
-                "turbo": {
-                    "method": "MiniMax-H3 Turbo LoRA",
-                    "lora": TURBO_LORA,
-                    "preview": True,
-                    "steps": {
-                        "default": TURBO_STEPS,
-                        "min": TURBO_MIN_STEPS,
-                        "max": TURBO_MAX_STEPS,
-                    },
-                    "sampler": TURBO_SAMPLER,
-                    "scheduler": TURBO_SCHEDULER,
-                    "lora_strength": TURBO_LORA_STRENGTH,
-                    "low_vram": TURBO_LOW_VRAM,
-                },
-                "base": {
-                    "method": "MiniMax-H3 Base",
-                    "lora": None,
-                    "preview": False,
-                    "steps": {
-                        "default": BASE_STEPS,
-                        "min": BASE_MIN_STEPS,
-                        "max": BASE_MAX_STEPS,
-                    },
-                    "sampler": BASE_SAMPLER,
-                    "scheduler": BASE_SCHEDULER,
-                    "lora_strength": None,
-                    "low_vram": None,
-                },
+                profile_id: SAMPLING_PROFILES[profile_id]
+                for profile_id in PUBLIC_SAMPLING_PROFILE_IDS
             },
+        },
+        "seed": {
+            "default": "random",
+            "options": [
+                {
+                    "id": "random" if value is None else str(value),
+                    "label": "Random" if value is None else str(value),
+                    "value": value,
+                }
+                for value in SEED_OPTIONS
+            ],
         },
         "audio": {
             "native": True,
@@ -222,8 +316,16 @@ _SPECS = {
         "geometry": {
             "multiple": CANVAS_MULTIPLE,
             "base_short_edge": BASE_SHORT_EDGE,
-            "max_pixels": MAX_PIXELS,
+            "max_pixels": RESOLUTION_PROFILES[DEFAULT_RESOLUTION]["max_pixels"],
             "native_aspects": aspect_presets(),
+            "default_resolution": DEFAULT_RESOLUTION,
+            "resolutions": {
+                resolution_id: {
+                    **profile,
+                    "native_aspects": aspect_presets(resolution_id),
+                }
+                for resolution_id, profile in RESOLUTION_PROFILES.items()
+            },
             "two_k_available": False,
         },
     },

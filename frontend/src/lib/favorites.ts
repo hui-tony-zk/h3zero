@@ -7,7 +7,11 @@ export function parseFavoriteSnapshot(value: unknown): Job[] {
   if (!Array.isArray(source.jobs)) return [];
   return source.jobs.flatMap((entry) => {
     const job = restoreJob(entry);
-    return job ? [{ ...job, status: "completed" as const, contentUrl: `/api/jobs/${encodeURIComponent(job.id)}/video`, hearted: true }] : [];
+    const contentUrl = entry && typeof entry === "object" && !Array.isArray(entry)
+      && typeof (entry as Record<string, unknown>).contentUrl === "string"
+      ? String((entry as Record<string, unknown>).contentUrl)
+      : `/api/jobs/${encodeURIComponent(job?.id ?? "")}/video`;
+    return job ? [{ ...job, status: "completed" as const, contentUrl, hearted: true }] : [];
   });
 }
 

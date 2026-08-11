@@ -39,6 +39,15 @@ async function deployGpu() {
   await deployGpuApp(python);
 }
 
+async function maintenance() {
+  const python = await prepareModal();
+  await run(
+    python,
+    ["-m", "modal", "run", "modal_services/h3.py::maintain_outputs"],
+    { env: modalEnvironment() },
+  );
+}
+
 async function generate(args) {
   const python = await prepareModal();
   await run(
@@ -98,6 +107,9 @@ switch (command) {
   case "deploy-gpu":
     await deployGpu();
     break;
+  case "maintenance":
+    await maintenance();
+    break;
   case "smoke":
     await smoke(forwardedArgs);
     break;
@@ -109,6 +121,6 @@ switch (command) {
     break;
   default:
     throw new Error(
-      "Use one of: setup, modal-setup, models, deploy, deploy-gpu, generate, smoke, test",
+      "Use one of: setup, modal-setup, models, deploy, deploy-gpu, maintenance, generate, smoke, test",
     );
 }

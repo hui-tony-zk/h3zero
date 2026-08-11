@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
-import { ApiError, contentUrl, getJobStatus } from "../lib/api/client";
+import { acknowledgeJob, ApiError, contentUrl, getJobStatus } from "../lib/api/client";
+import { cacheGeneratedVideo } from "../lib/generatedVideos";
 import type { Job } from "../types";
 
 export function useJobPolling(jobs: Job[], updateJob: (id: string, patch: Partial<Job>) => void) {
@@ -14,16 +15,32 @@ export function useJobPolling(jobs: Job[], updateJob: (id: string, patch: Partia
       if (active.length) await Promise.all(active.map(async (job) => {
         try {
           const result = await getJobStatus(job.id);
+          const remoteVideoUrl = result.status === "completed" ? result.videoUrl ?? contentUrl(job.id) : "";
+          let completedVideoUrl = remoteVideoUrl;
+          if (remoteVideoUrl) {
+            try {
+              completedVideoUrl = await cacheGeneratedVideo(job.id, remoteVideoUrl);
+              await acknowledgeJob(job.id).catch(() => undefined);
+            } catch {
+              // A completed Modal result remains usable when browser storage is
+              // unavailable or full; later loads fall back to the server URL.
+            }
+          }
           updateJob(job.id, {
             status: result.status,
+            createdAt: result.createdAt ?? job.createdAt,
+            samplingStartedAt: result.samplingStartedAt ?? job.samplingStartedAt,
+            finishedAt: ["completed", "failed", "expired", "cancelled"].includes(result.status)
+              ? result.updatedAt ?? job.finishedAt ?? Date.now()
+              : job.finishedAt,
             error: result.error,
             metadata: result.metadata ?? job.metadata,
             progress: result.status === "completed" ? undefined : result.progress ?? job.progress,
-            contentUrl: result.status === "completed" ? result.videoUrl ?? contentUrl(job.id) : job.contentUrl,
+            contentUrl: result.status === "completed" ? completedVideoUrl : job.contentUrl,
           });
         } catch (error) {
           if (error instanceof ApiError && (error.status === 404 || error.status === 410)) {
-            updateJob(job.id, { status: "expired", error: "This job is no longer available on Modal.", progress: undefined });
+            updateJob(job.id, { status: "expired", finishedAt: Date.now(), error: "This job is no longer available on Modal.", progress: undefined });
           }
         }
       }));

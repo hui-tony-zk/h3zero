@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+minimax_h3/local_loras.py
 
 # Python
 .venv/

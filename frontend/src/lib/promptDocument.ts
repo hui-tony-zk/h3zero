@@ -149,6 +149,22 @@ export function hydratePromptDocument(document: PromptDocument, references: Medi
   }) ?? emptyPromptDocument();
 }
 
+export function replaceReferenceInPromptDocument(document: PromptDocument, replacedId: string, replacement: MediaAsset): PromptDocument {
+  return mapDocument(document, (node) => {
+    if (node.type !== REFERENCE_MENTION_NODE || String(node.attrs?.id ?? "") !== replacedId) return node;
+    return {
+      ...node,
+      attrs: {
+        ...node.attrs,
+        id: replacement.id,
+        label: replacement.name,
+        kind: replacement.kind,
+        previewUrl: replacement.previewUrl,
+      },
+    };
+  }) ?? emptyPromptDocument();
+}
+
 export function prunePromptDocument(document: PromptDocument, references: MediaAsset[]): PromptDocument {
   const ids = new Set(references.map((asset) => asset.id));
   return mapDocument(document, (node) => {

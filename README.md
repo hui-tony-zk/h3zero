@@ -1,17 +1,15 @@
 # H3Zero
 
-## Generate 15-second MiniMax H3 videos in about 90 seconds.
+## Generate 15 seconds of MiniMax H3 video in about 50 seconds.
 
-Fast, native-audio video generation with the
-[MiniMax-H3 Turbo LoRA](https://huggingface.co/larryvrh/MiniMax-H3-Turbo-Lora),
-running on Modal.
+[LightX2V four-step Turbo](https://huggingface.co/lightx2v/Minimax-h3-Turbo)
+on Modal—with native audio, multimodal references, and quality-mode alternatives.
 
-**15 seconds at 480p in about 1.5 minutes on a warm RTX PRO 6000.**
+**Measured at 480p on a warm RTX PRO 6000.**
 
-One-command deployment · Image, video, and audio references · Cloud-synced
-favorites · Original base sampler included
+One-command deployment · Local-first results · Cloud-synced favorites
 
-864×480 landscape · 480×864 portrait · Desktop and mobile
+480p output · Landscape and portrait · Desktop and mobile
 
 ## Get started
 
@@ -30,26 +28,54 @@ Open the URL printed after deployment:
 web => https://your-workspace--minimax-h3-web.modal.run
 ```
 
-> Initial setup downloads about 94 GiB of model weights and builds the GPU
-> image. Completed downloads are reused if setup is interrupted.
+> Initial setup downloads about 98 GiB of model weights, plus any custom LoRAs,
+> and builds the GPU image. Completed downloads are reused if setup is interrupted.
 
 > The deployed endpoint is public and unauthenticated. Anyone with its URL can
 > start paid GPU work.
 
-## Turbo by default
+## Sampling profiles
 
-H3Zero uses the eight-step
-[MiniMax-H3 Turbo LoRA](https://huggingface.co/larryvrh/MiniMax-H3-Turbo-Lora)
-for both frame and reference generation. Turn off Turbo in the composer to use
-the original 20-step `res_multistep` base workflow.
+The composer offers one sampling-profile dropdown for both frame and reference
+generation: the four-step and eight-step
+[LightX2V MiniMax-H3 Turbo LoRAs](https://huggingface.co/lightx2v/Minimax-h3-Turbo),
+[Spectrum](https://github.com/xmarre/ComfyUI-Spectrum-MiniMax-H3) at 20 steps,
+and the original Base workflow at 20 steps. All four options generate at 480p
+with a random seed; resolution and seed controls are intentionally omitted.
 
 Turbo is a preview. Cold starts and model loading add time, and actual speed
 varies with Modal capacity.
+
+## Add your own LoRAs
+
+Create the gitignored file `minimax_h3/local_loras.py` and add each LoRA as a
+display name plus a direct public Hugging Face download URL:
+
+```python
+LORAS = {
+    "My Style": "https://huggingface.co/creator/model-repo/resolve/COMMIT_SHA/my-style.safetensors",
+}
+```
+
+Then download the weights and update both deployments:
+
+```bash
+npm run models
+npm run deploy:gpu
+npm run deploy
+```
+
+Configured LoRAs appear automatically in the composer mixer with a `0.0–1.5`
+strength control and are off by default. Use a commit SHA in the URL to pin the
+file. No Hugging Face token is used, so it must be publicly downloadable. The
+local catalog is not committed and each deployment keeps its own selection.
 
 ## Create with frames or references
 
 - Generate from text, a first frame, a last frame, or both
 - Mix ordered images, videos, and audio in one prompt
+- Run reference conditioning through the higher-quality FL2VA checkpoint; the
+  Ref2VA checkpoint remains downloaded as a fallback for future comparisons
 - Insert automatic `<Picture 1>`, `<Video 1>`, and `<Audio 1>` references
 - Use built-in prompt recipes and crop mismatched keyframes before GPU work
 - Follow the official [base](https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/docs/VIDEO_PROMPT_WRITING_GUIDE_base_en.md)
@@ -62,16 +88,27 @@ varies with Modal capacity.
 
 - Launch one to three variations together
 - Track durable jobs from queue through loading, sampling, and decoding
-- Keep completed results until you delete them
-- Sync favorites and remix sources across devices through Modal
+- Cache completed videos in local browser storage
+- Keep favorite videos and remix sources durably in Modal
 
 ![Two completed durable video jobs in H3Zero](docs/images/h3-video-carousel.png)
+
+## Sync favorites across devices
+
+Choose a Modal cloud-sync name, then use the same name in another browser to
+open the same favorite videos and restore their source inputs for remixing.
+Favorites retain their own MP4 and optional reference assets after temporary
+job storage is cleaned up.
+
+Sync names separate collections but are not passwords. Anyone who knows the
+deployment URL and sync name can open that collection.
 
 ## Use the API
 
 The same public URL serves H3Zero and its browser API. Submit, poll, download,
-cancel, and delete jobs without a second service. Turbo is the default; send
-`"turbo": false` to use base sampling.
+cancel, and delete jobs without a second service. Send `sampling_profile` as
+`turbo_4`, `turbo_8`, `spectrum`, or `base`; omitted values default to
+`turbo_4`.
 
 See the [browser API guide](docs/api.md) for routes and curl examples.
 
@@ -82,6 +119,7 @@ See the [browser API guide](docs/api.md) for routes and curl examples.
 | `npm run setup` | Install, download models, build, and deploy everything |
 | `npm run deploy` | Deploy only the gateway and frontend |
 | `npm run deploy:gpu` | Deploy intentional GPU worker or workflow changes |
+| `npm run maintenance` | Migrate favorites and prune expired temporary jobs |
 | `npm run generate -- ...` | Generate from the terminal |
 | `npm run frontend:dev` | Run the frontend locally |
 | `npm test` | Run all no-GPU checks |

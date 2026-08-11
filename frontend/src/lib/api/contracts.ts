@@ -17,6 +17,15 @@ function jobId(value: unknown): string {
   return value;
 }
 
+function timestamp(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value < 10_000_000_000 ? value * 1000 : value;
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
 function progress(value: unknown): JobProgress | undefined {
   if (value == null) return undefined;
   const source = record(value);
@@ -37,17 +46,25 @@ function metadata(value: unknown): GenerationMetadata | undefined {
 
 export function parseSpecs(value: unknown): H3Specs {
   const source = record(value);
-  if (source.version !== "1.2") throw new Error(`Unsupported H3 spec version: ${String(source.version)}`);
+  if (source.version !== "1.6") throw new Error(`Unsupported H3 spec version: ${String(source.version)}`);
   const modes = record(source.modes);
   record(modes.frames);
   record(modes.references);
   const output = record(source.output);
+  if (output.loras === undefined) output.loras = [];
+  if (!Array.isArray(output.loras)) throw new Error("The H3 API returned an invalid LoRA catalog.");
   const sampling = record(output.sampling);
   const profiles = record(sampling.profiles);
-  record(profiles.turbo);
+  record(profiles.turbo_4);
+  record(profiles.turbo_8);
+  record(profiles.spectrum);
   record(profiles.base);
+  record(output.seed);
   record(output.duration);
-  record(output.geometry);
+  const geometry = record(output.geometry);
+  const resolutions = record(geometry.resolutions);
+  record(resolutions["480p"]);
+  record(resolutions["768p"]);
   return source as unknown as H3Specs;
 }
 
@@ -61,6 +78,9 @@ export function parseJobStatus(value: unknown, fallbackId: string): JobStatusRes
   return {
     id: jobId(source.id ?? fallbackId),
     status: jobStatus(source.status),
+    createdAt: timestamp(source.created_at),
+    updatedAt: timestamp(source.updated_at),
+    samplingStartedAt: timestamp(source.sampling_started_at),
     error: typeof source.error === "string" ? source.error : undefined,
     metadata: metadata(source.result),
     videoUrl: typeof source.video_url === "string" ? source.video_url : undefined,

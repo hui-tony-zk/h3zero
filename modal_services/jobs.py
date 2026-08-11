@@ -12,6 +12,8 @@ from pathlib import Path
 
 OUTPUT_ROOT = "/outputs"
 JOB_STATUSES = {"queued", "running", "completed", "failed", "expired"}
+JOB_RETENTION_SECONDS = 24 * 60 * 60
+TOMBSTONE_RETENTION_SECONDS = 7 * 24 * 60 * 60
 _JOB_ID = re.compile(r"^[a-f0-9]{32}$")
 
 
@@ -172,6 +174,74 @@ def delete_job_artifacts(job_id: str, root: str | Path = OUTPUT_ROOT) -> None:
     shutil.rmtree(input_dir(job_id, root), ignore_errors=True)
 
 
+def cleanup_stale_jobs(
+    root: str | Path = OUTPUT_ROOT,
+    *,
+    now: float | None = None,
+    retention_seconds: float = JOB_RETENTION_SECONDS,
+    tombstone_retention_seconds: float = TOMBSTONE_RETENTION_SECONDS,
+) -> dict:
+    """Remove delivered/abandoned job artifacts while leaving favorites alone."""
+    root_path = _root(root)
+    current_time = time.time() if now is None else float(now)
+    removed: list[str] = []
+    jobs_dir = root_path / "jobs"
+    if jobs_dir.is_dir():
+        for path in jobs_dir.glob("*.json"):
+            try:
+                job_id = validate_job_id(path.stem)
+                record = read_job(job_id, root_path)
+                age = current_time - path.stat().st_mtime
+            except (json.JSONDecodeError, OSError, ValueError):
+                continue
+            if record is None or age < retention_seconds:
+                continue
+            if record["status"] in {"queued", "running"}:
+                mark_deleted(job_id, root_path)
+            delete_job_artifacts(job_id, root_path)
+            removed.append(job_id)
+
+    # Old versions could leave files behind without metadata. Once they have
+    # aged past the same delivery window, they are safe to prune.
+    for directory_name, pattern in (("videos", "*.mp4"), ("calls", "*.txt")):
+        directory = root_path / directory_name
+        if not directory.is_dir():
+            continue
+        for path in directory.glob(pattern):
+            try:
+                job_id = validate_job_id(path.stem)
+                orphaned = not metadata_path(job_id, root_path).is_file()
+                old = current_time - path.stat().st_mtime >= retention_seconds
+            except (OSError, ValueError):
+                continue
+            if orphaned and old:
+                path.unlink(missing_ok=True)
+
+    inputs_root = root_path / "inputs"
+    if inputs_root.is_dir():
+        for directory in inputs_root.iterdir():
+            try:
+                orphaned = not metadata_path(validate_job_id(directory.name), root_path).is_file()
+                old = current_time - directory.stat().st_mtime >= retention_seconds
+            except (OSError, ValueError):
+                continue
+            if directory.is_dir() and orphaned and old:
+                shutil.rmtree(directory, ignore_errors=True)
+
+    pruned_tombstones = 0
+    deleted_dir = root_path / "deleted"
+    if deleted_dir.is_dir():
+        for path in deleted_dir.glob("*.json"):
+            try:
+                old = current_time - path.stat().st_mtime >= tombstone_retention_seconds
+            except OSError:
+                continue
+            if old:
+                path.unlink(missing_ok=True)
+                pruned_tombstones += 1
+    return {"removed_job_ids": removed, "pruned_tombstones": pruned_tombstones}
+
+
 def public_job(record: dict, progress: dict | None = None) -> dict:
     """Return the stable browser-facing job representation."""
     job_id = validate_job_id(str(record["id"]))
@@ -186,6 +256,7 @@ def public_job(record: dict, progress: dict | None = None) -> dict:
         "status": record["status"],
         "created_at": record["created_at"],
         "updated_at": record["updated_at"],
+        "sampling_started_at": record.get("sampling_started_at"),
         "request": request,
         "result": result,
         "error": record.get("error"),

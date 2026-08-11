@@ -1,7 +1,7 @@
 import type { H3Specs, MediaAsset } from "../src/types";
 
 export const specs: H3Specs = {
-  version: "1.2",
+  version: "1.6",
   modes: {
     frames: { available: true, attachments: { mime_types: ["image/png"], max_bytes_each: 20 * 1024 * 1024 } },
     references: { available: true, order: "upload_order", attachments: {
@@ -12,12 +12,24 @@ export const specs: H3Specs = {
     } },
   },
   output: {
-    sampling: { default: "turbo", profiles: {
-      turbo: { method: "MiniMax-H3 Turbo LoRA", lora: "minimax_h3_turbo_v4_step600_ema.safetensors", preview: true, steps: { default: 8, min: 4, max: 8 }, sampler: "minimax_h3_turbo", scheduler: "simple", lora_strength: 1, low_vram: false },
-      base: { method: "MiniMax-H3 Base", lora: null, preview: false, steps: { default: 20, min: 1, max: 50 }, sampler: "res_multistep", scheduler: "simple", lora_strength: null, low_vram: null },
+    loras: [],
+    sampling: { default: "turbo_4", profiles: {
+      turbo_4: { label: "Turbo · 4 steps", method: "LightX2V MiniMax-H3 Turbo 4-step LoRA", lora: "minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors", preview: true, steps: { default: 4, min: 4, max: 4 }, sampler: "res_multistep", scheduler: "simple", lora_strength: 1, spectrum: false, turbo: true, low_vram: null },
+      turbo_8: { label: "8 step LoRA", method: "LightX2V MiniMax-H3 Turbo 8-step LoRA", lora: "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors", preview: true, steps: { default: 8, min: 8, max: 8 }, sampler: "res_multistep", scheduler: "simple", lora_strength: 1, spectrum: false, turbo: true, low_vram: null },
+      spectrum: { label: "Spectrum · 20 steps", method: "MiniMax-H3 Base with Spectrum v0.2.5", lora: null, preview: true, steps: { default: 20, min: 20, max: 20 }, sampler: "res_multistep", scheduler: "simple", lora_strength: null, spectrum: true, turbo: false, low_vram: null },
+      base: { label: "Base 20 steps", method: "MiniMax-H3 Base", lora: null, preview: false, steps: { default: 20, min: 20, max: 20 }, sampler: "res_multistep", scheduler: "simple", lora_strength: null, spectrum: false, turbo: false, low_vram: null },
     } },
+    seed: { default: "random", options: [{ id: "random", label: "Random", value: null }, { id: "42", label: "42", value: 42 }, { id: "106", label: "106", value: 106 }, { id: "99", label: "99", value: 99 }] },
     duration: { default_seconds: 5, options: [{ requested_seconds: 5, frames: 124, actual_seconds: 124 / 24 }] },
-    geometry: { multiple: 32, base_short_edge: 480, max_pixels: 480 * 864, native_aspects: [{ id: "9:16", width: 480, height: 864 }, { id: "16:9", width: 864, height: 480 }] },
+    geometry: {
+      multiple: 32, base_short_edge: 480, max_pixels: 480 * 864,
+      native_aspects: [{ id: "9:16", width: 480, height: 864 }, { id: "16:9", width: 864, height: 480 }],
+      default_resolution: "480p",
+      resolutions: {
+        "480p": { label: "480p", short_edge: 480, max_pixels: 480 * 864, recommended: false, native_aspects: [{ id: "9:16", width: 480, height: 864 }, { id: "16:9", width: 864, height: 480 }] },
+        "768p": { label: "768p (recommended)", short_edge: 768, max_pixels: 768 * 1344, recommended: true, native_aspects: [{ id: "9:16", width: 768, height: 1344 }, { id: "16:9", width: 1344, height: 768 }] },
+      },
+    },
   },
 };
 

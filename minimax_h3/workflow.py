@@ -4,29 +4,23 @@ from __future__ import annotations
 
 import json
 
+from minimax_h3.loras import CONFIGURED_LORAS, resolve_lora_strengths
 from minimax_h3.media import image_dimensions, image_suffix
 from minimax_h3.specs import (
-    BASE_MAX_STEPS,
-    BASE_MIN_STEPS,
-    BASE_SAMPLER,
-    BASE_SCHEDULER,
-    BASE_STEPS,
     FPS,
     MAX_IMAGE_BYTES,
     MAX_PIXELS,
-    TURBO_LORA,
-    TURBO_LORA_STRENGTH,
-    TURBO_LOW_VRAM,
-    TURBO_MAX_STEPS,
-    TURBO_MIN_STEPS,
-    TURBO_SAMPLER,
-    TURBO_SCHEDULER,
-    TURBO_STEPS,
     aligned_frame_count,
+    resolve_resolution,
+    resolve_sampling_profile,
 )
 
 FRAME_DIFFUSION_MODEL = "minimax_h3_fl2va_int8_convrot.safetensors"
 REFERENCE_DIFFUSION_MODEL = "minimax_h3_ref2va_int8_convrot.safetensors"
+# Keep the Ref2VA checkpoint available for fallback/A-B testing, while routing
+# the production reference-conditioning graph through the higher-quality FL2VA
+# checkpoint.
+REFERENCE_CONDITIONING_DIFFUSION_MODEL = FRAME_DIFFUSION_MODEL
 TEXT_ENCODER = "qwen3vl_32b_minimax_h3_int8_convrot.safetensors"
 VIDEO_VAE = "minimax_h3_video_vae_fp16.safetensors"
 AUDIO_VAE = "minimax_h3_audio_vae_fp32.safetensors"
@@ -42,10 +36,14 @@ def validate_generation(
     steps: int,
     sampler: str,
     scheduler: str,
-    turbo: bool = True,
+    sampling_profile: str | None = None,
+    turbo: bool | None = None,
+    resolution: str = "480p",
 ) -> None:
-    if not isinstance(turbo, bool):
+    if turbo is not None and not isinstance(turbo, bool):
         raise ValueError("turbo must be a boolean")
+    profile_id, profile = resolve_sampling_profile(sampling_profile, turbo=turbo)
+    resolution_id, resolution_profile = resolve_resolution(resolution)
     if not prompt.strip():
         raise ValueError("prompt must not be blank")
     if len(prompt) > 12_000:
@@ -56,22 +54,23 @@ def validate_generation(
         raise ValueError("width and height must each be at least 256")
     if width % 32 or height % 32:
         raise ValueError("width and height must be multiples of 32")
-    if width * height > MAX_PIXELS:
+    max_pixels = resolution_profile["max_pixels"]
+    if width * height > max_pixels:
         raise ValueError(
-            f"width * height must not exceed {MAX_PIXELS} pixels (480 * 864)"
+            f"width * height must not exceed {max_pixels} pixels for {resolution_id}"
         )
-    min_steps = TURBO_MIN_STEPS if turbo else BASE_MIN_STEPS
-    max_steps = TURBO_MAX_STEPS if turbo else BASE_MAX_STEPS
-    valid_sampler = TURBO_SAMPLER if turbo else BASE_SAMPLER
-    valid_scheduler = TURBO_SCHEDULER if turbo else BASE_SCHEDULER
+    min_steps = profile["steps"]["min"]
+    max_steps = profile["steps"]["max"]
+    valid_sampler = profile["sampler"]
+    valid_scheduler = profile["scheduler"]
     if not min_steps <= steps <= max_steps:
-        raise ValueError(
-            f"steps must be between {min_steps} and {max_steps}"
-        )
+        if min_steps == max_steps:
+            raise ValueError(f"steps must be {min_steps}")
+        raise ValueError(f"steps must be between {min_steps} and {max_steps}")
     if sampler != valid_sampler:
-        raise ValueError(f"sampler must be {valid_sampler!r} when turbo is {turbo}")
+        raise ValueError(f"sampler must be {valid_sampler!r} for {profile_id}")
     if scheduler != valid_scheduler:
-        raise ValueError(f"scheduler must be {valid_scheduler!r} when turbo is {turbo}")
+        raise ValueError(f"scheduler must be {valid_scheduler!r} for {profile_id}")
 
 
 def validate_image_bytes(raw: bytes) -> str:
@@ -93,9 +92,62 @@ def _common_workflow(
     sampler: str,
     scheduler: str,
     output_stem: str,
-    turbo: bool,
+    sampling_profile: str,
+    loras: dict[str, float],
 ) -> dict:
-    model_reference = ["turbo_lora", 0] if turbo else ["model", 0]
+    _, profile = resolve_sampling_profile(sampling_profile)
+    model_reference = ["model", 0]
+    accelerator_nodes = {}
+    if profile["lora"]:
+        accelerator_nodes["turbo_lora"] = {
+            "class_type": "LoraLoaderModelOnly",
+            "inputs": {
+                "model": model_reference,
+                "lora_name": profile["lora"],
+                "strength_model": profile["lora_strength"],
+            },
+        }
+        model_reference = ["turbo_lora", 0]
+    lora_nodes = {}
+    for index, lora in enumerate(CONFIGURED_LORAS):
+        strength = loras.get(lora["id"])
+        if strength is None:
+            continue
+        node_id = f"style_lora_{index}"
+        lora_nodes[node_id] = {
+            "class_type": "LoraLoaderModelOnly",
+            "inputs": {
+                "model": model_reference,
+                "lora_name": lora["filename"],
+                "strength_model": strength,
+            },
+        }
+        model_reference = [node_id, 0]
+    if profile["spectrum"]:
+        accelerator_nodes["spectrum"] = {
+            "class_type": "SpectrumApplyMiniMaxH3",
+            "inputs": {
+                "model": model_reference,
+                "enabled": True,
+                "blend_weight": 0.5,
+                "degree": 1,
+                "ridge_lambda": 0.1,
+                "window_size": 2.0,
+                "flex_window": 0.75,
+                "warmup_steps": 1,
+                "tail_actual_steps": 1,
+                "max_history": 8,
+                "debug": False,
+                "history_storage": "system_ram",
+                "bootstrap_first_forecast": True,
+                "anchor_residual_feedback": False,
+                "selective_rollback_correction": False,
+                "offline_smoothing_replay": True,
+                "audio_blend_weight": 0.0,
+                "offline_archive_storage": "system_ram",
+            },
+        }
+        model_reference = ["spectrum", 0]
     workflow = {
         "model": {
             "class_type": "UNETLoader",
@@ -126,8 +178,8 @@ def _common_workflow(
             "inputs": {"noise_seed": seed},
         },
         "sampler": {
-            "class_type": "MiniMaxH3TurboSampler" if turbo else "KSamplerSelect",
-            "inputs": {} if turbo else {"sampler_name": sampler},
+            "class_type": "KSamplerSelect",
+            "inputs": {"sampler_name": sampler},
         },
         "scheduler": {
             "class_type": "BasicScheduler",
@@ -182,16 +234,8 @@ def _common_workflow(
             },
         },
     }
-    if turbo:
-        workflow["turbo_lora"] = {
-            "class_type": "MiniMaxH3TurboLoRA",
-            "inputs": {
-                "model": ["model", 0],
-                "lora_name": TURBO_LORA,
-                "strength": TURBO_LORA_STRENGTH,
-                "low_vram": TURBO_LOW_VRAM,
-            },
-        }
+    workflow.update(accelerator_nodes)
+    workflow.update(lora_nodes)
     return workflow
 
 
@@ -202,17 +246,22 @@ def build_frames_workflow(
     height: int,
     duration_seconds: float,
     seed: int,
-    turbo: bool = True,
+    turbo: bool | None = None,
+    sampling_profile: str | None = None,
     steps: int | None = None,
     sampler: str | None = None,
     scheduler: str | None = None,
+    loras: dict[str, float] | None = None,
     output_stem: str = "h3",
     first_frame_filename: str | None = None,
     last_frame_filename: str | None = None,
+    resolution: str = "480p",
 ) -> dict:
-    steps = steps if steps is not None else (TURBO_STEPS if turbo else BASE_STEPS)
-    sampler = sampler or (TURBO_SAMPLER if turbo else BASE_SAMPLER)
-    scheduler = scheduler or (TURBO_SCHEDULER if turbo else BASE_SCHEDULER)
+    profile_id, profile = resolve_sampling_profile(sampling_profile, turbo=turbo)
+    steps = steps if steps is not None else profile["steps"]["default"]
+    sampler = sampler or profile["sampler"]
+    scheduler = scheduler or profile["scheduler"]
+    loras = resolve_lora_strengths(loras)
     validate_generation(
         prompt=prompt,
         width=width,
@@ -221,7 +270,8 @@ def build_frames_workflow(
         steps=steps,
         sampler=sampler,
         scheduler=scheduler,
-        turbo=turbo,
+        sampling_profile=profile_id,
+        resolution=resolution,
     )
     if not 0 <= seed <= 0xFFFFFFFFFFFFFFFF:
         raise ValueError("seed must be an unsigned 64-bit integer")
@@ -242,7 +292,8 @@ def build_frames_workflow(
         sampler=sampler,
         scheduler=scheduler,
         output_stem=output_stem,
-        turbo=turbo,
+        sampling_profile=profile_id,
+        loras=loras,
     )
     for label, filename in (
         ("first_frame", first_frame_filename),
@@ -267,16 +318,21 @@ def build_reference_workflow(
     duration_seconds: float,
     seed: int,
     references: list[dict],
-    turbo: bool = True,
+    turbo: bool | None = None,
+    sampling_profile: str | None = None,
     ref_image_size: str = "match",
     steps: int | None = None,
     sampler: str | None = None,
     scheduler: str | None = None,
+    loras: dict[str, float] | None = None,
     output_stem: str = "h3",
+    resolution: str = "480p",
 ) -> dict:
-    steps = steps if steps is not None else (TURBO_STEPS if turbo else BASE_STEPS)
-    sampler = sampler or (TURBO_SAMPLER if turbo else BASE_SAMPLER)
-    scheduler = scheduler or (TURBO_SCHEDULER if turbo else BASE_SCHEDULER)
+    profile_id, profile = resolve_sampling_profile(sampling_profile, turbo=turbo)
+    steps = steps if steps is not None else profile["steps"]["default"]
+    sampler = sampler or profile["sampler"]
+    scheduler = scheduler or profile["scheduler"]
+    loras = resolve_lora_strengths(loras)
     validate_generation(
         prompt=prompt,
         width=width,
@@ -285,7 +341,8 @@ def build_reference_workflow(
         steps=steps,
         sampler=sampler,
         scheduler=scheduler,
-        turbo=turbo,
+        sampling_profile=profile_id,
+        resolution=resolution,
     )
     if not 0 <= seed <= 0xFFFFFFFFFFFFFFFF:
         raise ValueError("seed must be an unsigned 64-bit integer")
@@ -304,7 +361,7 @@ def build_reference_workflow(
         "ref_image_size": ref_image_size,
     }
     workflow = _common_workflow(
-        diffusion_model=REFERENCE_DIFFUSION_MODEL,
+        diffusion_model=REFERENCE_CONDITIONING_DIFFUSION_MODEL,
         conditioning_class="MiniMaxH3OrderedReferenceToVideo",
         conditioning_inputs=conditioning_inputs,
         seed=seed,
@@ -312,7 +369,8 @@ def build_reference_workflow(
         sampler=sampler,
         scheduler=scheduler,
         output_stem=output_stem,
-        turbo=turbo,
+        sampling_profile=profile_id,
+        loras=loras,
     )
 
     for index, reference in enumerate(references):

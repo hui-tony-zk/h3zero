@@ -6,7 +6,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from modal_services import jobs
+from modal_services import favorites, jobs
 from modal_services.gateway import create_gateway, parse_config
 
 
@@ -204,8 +204,10 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual((payload["width"], payload["height"]), (480, 480))
         self.assertEqual(payload["geometry_source"], "first_frame")
         self.assertTrue(payload["turbo"])
-        self.assertEqual(payload["steps"], 8)
-        self.assertEqual(payload["sampler"], "minimax_h3_turbo")
+        self.assertEqual(payload["sampling_profile"], "turbo_4")
+        self.assertEqual(payload["resolution"], "480p")
+        self.assertEqual(payload["steps"], 4)
+        self.assertEqual(payload["sampler"], "res_multistep")
         self.assertEqual(payload["scheduler"], "simple")
 
         pending = self.client.get(f"/api/jobs/{job_id}")
@@ -273,7 +275,17 @@ class GatewayTests(unittest.TestCase):
             job_id,
             root=self.output_root,
             status="completed",
-            result={"seed": 9, "width": 480, "height": 480},
+            result={
+                "seed": 9,
+                "width": 480,
+                "height": 480,
+                "loras": [{
+                    "id": "pose",
+                    "name": "Pose",
+                    "filename": "pose.safetensors",
+                    "strength": 0.8,
+                }],
+            },
         )
         favorite_job = {
             "id": job_id,
@@ -284,6 +296,7 @@ class GatewayTests(unittest.TestCase):
             "status": "completed",
             "duration": 5,
             "aspect": "16:9",
+            "loras": {"client-value-is-not-authoritative": 1.0},
             "inputAssetIds": ["source-frame"],
             "firstFrameId": "source-frame",
             "contentUrl": "wrong",
@@ -307,22 +320,108 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(saved.status_code, 200, saved.text)
         self.assertTrue(saved.json()["hearted"])
         self.assertEqual(saved.json()["prompt"], "A fox crossing fresh snow. Audio: soft wind.")
-        self.assertEqual(saved.json()["contentUrl"], f"/api/jobs/{job_id}/video")
+        self.assertEqual(saved.json()["loras"], {"pose": 0.8})
+        self.assertEqual(
+            saved.json()["contentUrl"],
+            f"/api/cloud-sync/tony/favorites/{job_id}/video",
+        )
 
         snapshot = self.client.get("/api/cloud-sync/tony/favorites")
         self.assertEqual(snapshot.status_code, 200)
         self.assertEqual([item["id"] for item in snapshot.json()["jobs"]], [job_id])
+        self.assertEqual(snapshot.json()["jobs"][0]["loras"], {"pose": 0.8})
         self.assertEqual(snapshot.json()["username"], "tony")
         self.assertEqual(self.client.get("/api/cloud-sync/other/favorites").json()["jobs"], [])
         asset = self.client.get("/api/cloud-sync/tony/assets/source-frame")
         self.assertEqual(asset.status_code, 200)
         self.assertEqual(asset.content, self.png())
+        favorite_video = self.client.get(
+            f"/api/cloud-sync/tony/favorites/{job_id}/video"
+        )
+        self.assertEqual(favorite_video.status_code, 200)
+        self.assertEqual(favorite_video.content, b"favorite-mp4")
 
         removed = self.client.delete(f"/api/cloud-sync/tony/favorites/{job_id}")
         self.assertEqual(removed.status_code, 204)
         self.assertEqual(self.client.get("/api/cloud-sync/tony/favorites").json()["jobs"], [])
         self.assertEqual(self.client.get("/api/cloud-sync/tony/assets/source-frame").status_code, 404)
+        self.assertEqual(
+            self.client.get(f"/api/cloud-sync/tony/favorites/{job_id}/video").status_code,
+            404,
+        )
         self.assertEqual(self.client.get(f"/api/jobs/{job_id}/video").content, b"favorite-mp4")
+
+    def test_acknowledgement_releases_a_browser_cached_result(self):
+        job_id = self.submit()["id"]
+        path = jobs.video_path(job_id, self.output_root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"temporary-mp4")
+        jobs.update_job(job_id, root=self.output_root, status="completed", result={})
+
+        acknowledged = self.client.post(f"/api/jobs/{job_id}/acknowledge")
+        self.assertEqual(acknowledged.status_code, 204)
+        self.assertFalse(path.exists())
+        self.assertIsNone(jobs.read_job(job_id, self.output_root))
+        self.assertNotIn(job_id, self.progress.values)
+        self.assertEqual(self.client.post(f"/api/jobs/{job_id}/acknowledge").status_code, 204)
+
+    def test_cached_video_can_be_favorited_after_job_acknowledgement(self):
+        job_id = self.submit()["id"]
+        path = jobs.video_path(job_id, self.output_root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"temporary-mp4")
+        jobs.update_job(job_id, root=self.output_root, status="completed", result={})
+        self.assertEqual(self.client.post(f"/api/jobs/{job_id}/acknowledge").status_code, 204)
+
+        saved = self.client.put(
+            f"/api/cloud-sync/tony/favorites/{job_id}",
+            data={
+                "job": json.dumps({
+                    "id": job_id,
+                    "mode": "frames",
+                    "prompt": "locally retained prompt",
+                    "duration": 5,
+                    "inputAssetIds": [],
+                    "metadata": {"seed": 9},
+                }),
+                "assets": "[]",
+            },
+            files={"video": (f"{job_id}.mp4", b"browser-cached-mp4", "video/mp4")},
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        self.assertEqual(saved.json()["prompt"], "locally retained prompt")
+        favorite_video = self.client.get(
+            f"/api/cloud-sync/tony/favorites/{job_id}/video"
+        )
+        self.assertEqual(favorite_video.content, b"browser-cached-mp4")
+
+        # Deleting a locally acknowledged job remains idempotent and removes
+        # its cloud favorite, preserving the existing UI delete behavior.
+        self.assertEqual(self.client.delete(f"/api/jobs/{job_id}").status_code, 204)
+        self.assertIsNone(favorites.read_favorite("tony", job_id, self.output_root))
+
+    def test_legacy_favorite_is_migrated_before_its_job_video_is_removed(self):
+        job_id = self.submit()["id"]
+        source = jobs.video_path(job_id, self.output_root)
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_bytes(b"legacy-favorite-mp4")
+        jobs.update_job(job_id, root=self.output_root, status="completed", result={})
+        favorites.write_favorite("tony", {
+            "id": job_id,
+            "createdAt": 1,
+            "contentUrl": f"/api/jobs/{job_id}/video",
+        }, self.output_root)
+
+        snapshot = self.client.get("/api/cloud-sync/tony/favorites")
+        self.assertEqual(snapshot.status_code, 200)
+        self.assertEqual(
+            snapshot.json()["jobs"][0]["contentUrl"],
+            f"/api/cloud-sync/tony/favorites/{job_id}/video",
+        )
+        self.assertEqual(
+            favorites.video_path("tony", job_id, self.output_root).read_bytes(),
+            b"legacy-favorite-mp4",
+        )
 
     def test_deleting_a_job_also_removes_its_favorite(self):
         job_id = self.submit()["id"]
@@ -407,11 +506,37 @@ class GatewayTests(unittest.TestCase):
             parse_config("test", '{"width": true}')
         base = parse_config("test", '{"turbo": false}')
         self.assertEqual(
-            (base["steps"], base["sampler"], base["scheduler"]),
-            (20, "res_multistep", "simple"),
+            (base["sampling_profile"], base["steps"], base["sampler"], base["scheduler"]),
+            ("spectrum", 20, "res_multistep", "simple"),
         )
+        turbo_8 = parse_config("test", '{"sampling_profile":"turbo_8","seed":42}')
+        self.assertEqual(
+            (turbo_8["turbo"], turbo_8["steps"], turbo_8["seed"]),
+            (True, 8, 42),
+        )
+        spectrum = parse_config("test", '{"sampling_profile":"spectrum","seed":106}')
+        self.assertEqual(
+            (spectrum["turbo"], spectrum["steps"], spectrum["seed"]),
+            (False, 20, 106),
+        )
+        high_resolution = parse_config(
+            "test",
+            '{"resolution":"768p","width":1344,"height":768}',
+        )
+        self.assertEqual(
+            (high_resolution["resolution"], high_resolution["width"], high_resolution["height"]),
+            ("768p", 1344, 768),
+        )
+        with self.assertRaisesRegex(ValueError, "turbo conflicts"):
+            parse_config("test", '{"sampling_profile":"spectrum","turbo":true}')
+        with self.assertRaisesRegex(ValueError, "sampling_profile must be one of"):
+            parse_config("test", '{"sampling_profile":"unknown"}')
         with self.assertRaisesRegex(ValueError, "turbo must be a boolean"):
             parse_config("test", '{"turbo": "no"}')
+        with self.assertRaisesRegex(ValueError, "resolution must be one of"):
+            parse_config("test", '{"resolution":"1080p"}')
+        with self.assertRaisesRegex(ValueError, "unknown or unavailable LoRAs"):
+            parse_config("test", '{"loras": {"not-configured": 1.0}}')
         response = self.client.post(
             "/api/jobs",
             data={"prompt": "test", "width": "512"},
@@ -423,7 +548,7 @@ class GatewayTests(unittest.TestCase):
             data={"prompt": "test", "config": '{"width": 640, "height": 480}'},
         )
         self.assertEqual(response.status_code, 422)
-        self.assertIn("864x480", response.text)
+        self.assertIn("480p native presets", response.text)
 
     def test_rejects_uncropped_mismatched_frames(self):
         response = self.client.post(
@@ -482,6 +607,7 @@ class GatewayTests(unittest.TestCase):
 
         payload = self.service.generate.submissions[0]
         self.assertEqual(payload["mode"], "references")
+        self.assertEqual(payload["ref_image_size"], "match")
         self.assertIsNone(payload["first_frame"])
         self.assertEqual(
             [item["id"] for item in payload["references"]],

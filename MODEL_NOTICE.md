@@ -21,6 +21,6 @@ Volumes are distributed storage; deployers are responsible for confirming that
 their location, infrastructure, and users comply with MiniMax's terms.
 
 The optional acceleration weights used by this project are the
-[MiniMax-H3 Turbo LoRA](https://huggingface.co/larryvrh/MiniMax-H3-Turbo-Lora),
+[LightX2V MiniMax-H3 Turbo LoRA](https://huggingface.co/lightx2v/Minimax-h3-Turbo),
 published separately under Apache-2.0. That license does not replace or relax
 the MiniMax H3 base model license described above.

@@ -1,10 +1,15 @@
-import type { AspectId, FavoriteAsset, GenerationMode, Job, JobStatus } from "../../types";
+import type { AspectId, FavoriteAsset, GenerationMode, Job, JobStatus, ResolutionId, SamplingProfileId, SeedChoice } from "../../types";
+import { isTurboProfile } from "../sampling";
 
 const STORAGE_KEY = "h3-studio-jobs-v2";
 const aspects = new Set<AspectId>(["9:16", "16:9"]);
 const statuses = new Set<JobStatus>(["queued", "running", "completed", "failed", "expired", "cancelled"]);
 
 function stringList(value: unknown) { return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []; }
+function numberRecord(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, number] => typeof entry[1] === "number" && Number.isFinite(entry[1])));
+}
 function mode(value: unknown): GenerationMode { return value === "references" ? "references" : "frames"; }
 function aspect(value: unknown): AspectId {
   if (aspects.has(value as AspectId)) return value as AspectId;
@@ -47,13 +52,24 @@ export function restoreJob(value: unknown): Job | null {
   const jobStatus = status(source.status);
   const inputAssetIds = stringList(source.inputAssetIds);
   const referenceIds = stringList(source.referenceIds);
+  const samplingProfile = (["turbo_4", "turbo_8", "spectrum", "base"].includes(String(source.samplingProfile))
+    ? source.samplingProfile
+    : source.turbo === false ? "spectrum" : "turbo_4") as SamplingProfileId;
+  const seed = (source.seed === 42 || source.seed === 106 || source.seed === 99 ? source.seed : "random") as SeedChoice;
+  const resolution = (source.resolution === "768p" ? "768p" : "480p") as ResolutionId;
   return {
     id: source.id, mode: jobMode, status: jobStatus,
     prompt: typeof source.prompt === "string" ? source.prompt : "",
     createdAt, updatedAt: typeof source.updatedAt === "number" ? source.updatedAt : createdAt,
+    finishedAt: typeof source.finishedAt === "number" ? source.finishedAt : undefined,
+    samplingStartedAt: typeof source.samplingStartedAt === "number" ? source.samplingStartedAt : undefined,
     duration: typeof source.duration === "number" ? source.duration : 5,
     aspect: aspect(source.aspect),
-    turbo: source.turbo !== false,
+    turbo: isTurboProfile(samplingProfile),
+    samplingProfile,
+    seed,
+    resolution,
+    loras: numberRecord(source.loras),
     displayAspect: typeof source.displayAspect === "number" ? source.displayAspect : undefined,
     inputAssetIds,
     firstFrameId: typeof source.firstFrameId === "string" ? source.firstFrameId : undefined,

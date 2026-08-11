@@ -1,5 +1,6 @@
 import unittest
 import json
+from unittest.mock import patch
 
 from minimax_h3.workflow import (
     MAX_PIXELS,
@@ -47,15 +48,17 @@ class WorkflowTests(unittest.TestCase):
             workflow["clip"]["inputs"]["clip_name"],
             "qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
         )
-        self.assertEqual(workflow["turbo_lora"]["class_type"], "MiniMaxH3TurboLoRA")
+        self.assertEqual(workflow["turbo_lora"]["class_type"], "LoraLoaderModelOnly")
         self.assertEqual(workflow["turbo_lora"]["inputs"], {
             "model": ["model", 0],
-            "lora_name": "minimax_h3_turbo_v4_step600_ema.safetensors",
-            "strength": 1.0,
-            "low_vram": False,
+            "lora_name": "minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors",
+            "strength_model": 1.0,
         })
-        self.assertEqual(workflow["sampler"]["class_type"], "MiniMaxH3TurboSampler")
-        self.assertEqual(workflow["scheduler"]["inputs"]["steps"], 8)
+        self.assertEqual(workflow["sampler"], {
+            "class_type": "KSamplerSelect",
+            "inputs": {"sampler_name": "res_multistep"},
+        })
+        self.assertEqual(workflow["scheduler"]["inputs"]["steps"], 4)
         self.assertEqual(workflow["scheduler"]["inputs"]["scheduler"], "simple")
         self.assertEqual(workflow["scheduler"]["inputs"]["model"], ["turbo_lora", 0])
         self.assertEqual(workflow["guider"]["inputs"]["model"], ["turbo_lora", 0])
@@ -76,6 +79,36 @@ class WorkflowTests(unittest.TestCase):
             ["load_last_frame", 0],
         )
 
+    def test_builds_eight_step_and_spectrum_rnd_profiles(self):
+        turbo_8 = build_frames_workflow(
+            prompt="Eight-step comparison.",
+            width=864,
+            height=480,
+            duration_seconds=5,
+            seed=42,
+            sampling_profile="turbo_8",
+        )
+        self.assertEqual(
+            turbo_8["turbo_lora"]["inputs"]["lora_name"],
+            "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+        )
+        self.assertEqual(turbo_8["scheduler"]["inputs"]["steps"], 8)
+
+        spectrum = build_frames_workflow(
+            prompt="Spectrum comparison.",
+            width=864,
+            height=480,
+            duration_seconds=5,
+            seed=106,
+            sampling_profile="spectrum",
+        )
+        self.assertNotIn("turbo_lora", spectrum)
+        self.assertEqual(spectrum["spectrum"]["class_type"], "SpectrumApplyMiniMaxH3")
+        self.assertTrue(spectrum["spectrum"]["inputs"]["offline_smoothing_replay"])
+        self.assertEqual(spectrum["spectrum"]["inputs"]["audio_blend_weight"], 0.0)
+        self.assertEqual(spectrum["scheduler"]["inputs"]["steps"], 20)
+        self.assertEqual(spectrum["scheduler"]["inputs"]["model"], ["spectrum", 0])
+
     def test_rejects_oversized_canvas(self):
         with self.assertRaisesRegex(ValueError, "must not exceed"):
             build_frames_workflow(
@@ -85,7 +118,21 @@ class WorkflowTests(unittest.TestCase):
                 duration_seconds=5,
                 seed=1,
             )
-        self.assertEqual(MAX_PIXELS, 480 * 864)
+        self.assertEqual(MAX_PIXELS, 768 * 1344)
+
+    def test_accepts_recommended_768p_canvas(self):
+        workflow = build_frames_workflow(
+            prompt="High resolution",
+            width=1344,
+            height=768,
+            duration_seconds=5,
+            seed=42,
+            resolution="768p",
+        )
+        self.assertEqual(
+            (workflow["conditioning"]["inputs"]["width"], workflow["conditioning"]["inputs"]["height"]),
+            (1344, 768),
+        )
 
     def test_rejects_four_second_compatibility_duration(self):
         with self.assertRaisesRegex(ValueError, "between 5 and 15"):
@@ -140,8 +187,9 @@ class WorkflowTests(unittest.TestCase):
         )
         self.assertEqual(
             workflow["model"]["inputs"]["unet_name"],
-            "minimax_h3_ref2va_int8_convrot.safetensors",
+            "minimax_h3_fl2va_int8_convrot.safetensors",
         )
+        self.assertEqual(workflow["conditioning"]["inputs"]["ref_image_size"], "match")
         self.assertEqual(
             workflow["conditioning"]["class_type"],
             "MiniMaxH3OrderedReferenceToVideo",
@@ -153,11 +201,11 @@ class WorkflowTests(unittest.TestCase):
             ["reference_components_2", 1],
         )
         self.assertEqual(workflow["load_reference_0"]["class_type"], "LoadAudio")
-        self.assertEqual(workflow["turbo_lora"]["class_type"], "MiniMaxH3TurboLoRA")
-        self.assertEqual(workflow["sampler"]["class_type"], "MiniMaxH3TurboSampler")
+        self.assertEqual(workflow["turbo_lora"]["class_type"], "LoraLoaderModelOnly")
+        self.assertEqual(workflow["sampler"]["class_type"], "KSamplerSelect")
 
     def test_rejects_non_turbo_sampling_settings(self):
-        with self.assertRaisesRegex(ValueError, "between 4 and 8"):
+        with self.assertRaisesRegex(ValueError, "steps must be 4"):
             build_frames_workflow(
                 prompt="Too few steps",
                 width=864,
@@ -166,17 +214,17 @@ class WorkflowTests(unittest.TestCase):
                 seed=1,
                 steps=3,
             )
-        with self.assertRaisesRegex(ValueError, "minimax_h3_turbo"):
+        with self.assertRaisesRegex(ValueError, "res_multistep"):
             build_frames_workflow(
                 prompt="Wrong sampler",
                 width=864,
                 height=480,
                 duration_seconds=5,
                 seed=1,
-                sampler="res_multistep",
+                sampler="minimax_h3_turbo",
             )
 
-    def test_builds_base_sampling_graph_when_turbo_is_disabled(self):
+    def test_builds_spectrum_sampling_graph_when_turbo_is_disabled(self):
         workflow = build_frames_workflow(
             prompt="A lighthouse in a storm.",
             width=864,
@@ -191,8 +239,46 @@ class WorkflowTests(unittest.TestCase):
             "inputs": {"sampler_name": "res_multistep"},
         })
         self.assertEqual(workflow["scheduler"]["inputs"]["steps"], 20)
-        self.assertEqual(workflow["scheduler"]["inputs"]["model"], ["model", 0])
-        self.assertEqual(workflow["guider"]["inputs"]["model"], ["model", 0])
+        self.assertEqual(workflow["scheduler"]["inputs"]["model"], ["spectrum", 0])
+        self.assertEqual(workflow["guider"]["inputs"]["model"], ["spectrum", 0])
+
+    def test_optional_style_lora_is_chained_after_turbo(self):
+        configured = ({
+            "id": "pose",
+            "name": "Pose",
+            "filename": "pose.safetensors",
+            "default_enabled": False,
+            "default_strength": 1.0,
+            "min_strength": 0.0,
+            "max_strength": 1.5,
+            "step": 0.1,
+            "repo": "owner/repo",
+            "source": "pose.safetensors",
+            "revision": "abc",
+            "prompt": None,
+        },)
+        with (
+            patch("minimax_h3.loras.CONFIGURED_LORAS", configured),
+            patch("minimax_h3.workflow.CONFIGURED_LORAS", configured),
+        ):
+            workflow = build_frames_workflow(
+                prompt="A rider holds the pose.",
+                width=864,
+                height=480,
+                duration_seconds=5,
+                seed=42,
+                loras={"pose": 0.7},
+            )
+        self.assertEqual(workflow["style_lora_0"], {
+            "class_type": "LoraLoaderModelOnly",
+            "inputs": {
+                "model": ["turbo_lora", 0],
+                "lora_name": "pose.safetensors",
+                "strength_model": 0.7,
+            },
+        })
+        self.assertEqual(workflow["scheduler"]["inputs"]["model"], ["style_lora_0", 0])
+        self.assertEqual(workflow["guider"]["inputs"]["model"], ["style_lora_0", 0])
 
 
 if __name__ == "__main__":

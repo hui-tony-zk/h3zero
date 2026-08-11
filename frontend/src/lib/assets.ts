@@ -2,7 +2,8 @@ import type { FavoriteAsset, MediaAsset, MediaKind } from "../types";
 
 const DB_NAME = "h3-studio";
 const STORE_NAME = "draft-assets";
-const DB_VERSION = 1;
+const GENERATED_VIDEO_STORE_NAME = "generated-videos";
+const DB_VERSION = 2;
 export const MAX_FRAME_BYTES = 20 * 1024 * 1024;
 
 type StoredAsset = Omit<MediaAsset, "file" | "previewUrl"> & { blob: Blob };
@@ -13,10 +14,44 @@ function openDatabase() {
     request.onupgradeneeded = () => {
       const database = request.result;
       if (!database.objectStoreNames.contains(STORE_NAME)) database.createObjectStore(STORE_NAME, { keyPath: "id" });
+      if (!database.objectStoreNames.contains(GENERATED_VIDEO_STORE_NAME)) database.createObjectStore(GENERATED_VIDEO_STORE_NAME);
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error ?? new Error("Could not open draft storage."));
   });
+}
+
+export async function saveGeneratedVideo(id: string, blob: Blob) {
+  const database = await openDatabase();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(GENERATED_VIDEO_STORE_NAME, "readwrite");
+    transaction.objectStore(GENERATED_VIDEO_STORE_NAME).put(blob, id);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error ?? new Error("Could not save generated video."));
+  });
+  database.close();
+}
+
+export async function loadGeneratedVideo(id: string): Promise<Blob | null> {
+  const database = await openDatabase();
+  const stored = await new Promise<Blob | undefined>((resolve, reject) => {
+    const request = database.transaction(GENERATED_VIDEO_STORE_NAME).objectStore(GENERATED_VIDEO_STORE_NAME).get(id);
+    request.onsuccess = () => resolve(request.result as Blob | undefined);
+    request.onerror = () => reject(request.error ?? new Error("Could not restore generated video."));
+  });
+  database.close();
+  return stored ?? null;
+}
+
+export async function deleteGeneratedVideo(id: string) {
+  const database = await openDatabase();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(GENERATED_VIDEO_STORE_NAME, "readwrite");
+    transaction.objectStore(GENERATED_VIDEO_STORE_NAME).delete(id);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error ?? new Error("Could not delete generated video."));
+  });
+  database.close();
 }
 
 function mediaKind(type: string): MediaKind {
@@ -45,7 +80,7 @@ function readMediaDuration(url: string, kind: "video" | "audio") {
   });
 }
 
-export async function createMediaAsset(file: File, id = crypto.randomUUID()): Promise<MediaAsset> {
+export async function createMediaAsset(file: File, id: string = crypto.randomUUID()): Promise<MediaAsset> {
   const kind = mediaKind(file.type);
   const previewUrl = URL.createObjectURL(file);
   let width: number | undefined;

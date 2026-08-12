@@ -184,21 +184,22 @@ function ProjectEditor({ project, jobs, onRename, onSetAspect, onDelete, onUpdat
       </header>
 
       <div className="grid min-h-0 flex-1 grid-rows-[minmax(300px,1fr)_auto] lg:grid-cols-[minmax(0,1fr)_260px] lg:grid-rows-[minmax(0,1fr)_auto]">
-        <ProjectPreview clips={orderedClips} selectedClipId={selectedClip?.id ?? null} aspect={project.aspect} seekTarget={seekTarget} onSelectClip={selectPreviewClip} onPosition={updatePreviewPosition} onUpdateClip={onUpdateClip} onRemoveClip={onRemoveClip} />
+        <ProjectPreview clips={orderedClips} jobsById={jobsById} selectedClipId={selectedClip?.id ?? null} aspect={project.aspect} seekTarget={seekTarget} onSelectClip={selectPreviewClip} onPosition={updatePreviewPosition} onUpdateClip={onUpdateClip} onRemoveClip={onRemoveClip} />
         <AnimatePresence mode="wait">
           <ClipInspector key={selectedClip?.id ?? "empty"} clip={selectedClip} job={selectedClip ? jobsById.get(selectedClip.jobId) ?? null : null} index={selectedIndex} clipCount={orderedClips.length} onUpdate={onUpdateClip} onRemove={(clipId) => onRemoveClip(clipId)} onMove={onMoveClip} onRemix={onRemix} />
         </AnimatePresence>
         <div className="border-t border-white/7 lg:col-span-2">
           <div className="flex items-center justify-between px-4 py-2.5 sm:px-5"><span className="text-[9px] font-bold uppercase tracking-[0.16em] text-white/32">Timeline</span><button type="button" onClick={onOpenLibrary} className="flex items-center gap-1.5 text-[10px] font-semibold text-reelo-accent hover:text-white"><Plus size={12} /> Add from videos</button></div>
-          {orderedClips.length ? <TimelineStrip clips={orderedClips} selectedClipId={selectedClip?.id ?? null} playhead={playhead} onSelect={selectPreviewClip} onSeek={seekPreview} onReorder={onReorderClips} /> : <div className="px-5 pb-5 text-[11px] text-white/35">No clips yet. Add a completed result from Videos.</div>}
+          {orderedClips.length ? <TimelineStrip clips={orderedClips} jobsById={jobsById} selectedClipId={selectedClip?.id ?? null} playhead={playhead} onSelect={selectPreviewClip} onSeek={seekPreview} onReorder={onReorderClips} /> : <div className="px-5 pb-5 text-[11px] text-white/35">No clips yet. Add a completed result from Videos.</div>}
         </div>
       </div>
     </div>
   );
 }
 
-function TimelineStrip({ clips, selectedClipId, playhead, onSelect, onSeek, onReorder }: {
+function TimelineStrip({ clips, jobsById, selectedClipId, playhead, onSelect, onSeek, onReorder }: {
   clips: ProjectClip[];
+  jobsById: Map<string, Job>;
   selectedClipId: string | null;
   playhead: ProjectPlayhead | null;
   onSelect: (id: string) => void;
@@ -280,7 +281,7 @@ function TimelineStrip({ clips, selectedClipId, playhead, onSelect, onSeek, onRe
       <SortableContext items={itemIds} strategy={horizontalListSortingStrategy}>
         <div className="overflow-x-auto px-4 pb-4 pt-2 sm:px-5" aria-label="Project timeline">
           <div className="relative flex w-max gap-2">
-            {clips.map((clip, index) => <SortableTimelineClip key={clip.id} clip={clip} position={index + 1} selected={clip.id === selectedClipId} active={clip.id === activeClipId} setClipNode={setClipNode} onSelect={() => onSelect(clip.id)} />)}
+            {clips.map((clip, index) => <SortableTimelineClip key={clip.id} clip={clip} sourceUrl={jobsById.get(clip.jobId)?.contentUrl} position={index + 1} selected={clip.id === selectedClipId} active={clip.id === activeClipId} setClipNode={setClipNode} onSelect={() => onSelect(clip.id)} />)}
             {playheadClip && <button
               type="button"
               role="slider"
@@ -318,13 +319,14 @@ function TimelineStrip({ clips, selectedClipId, playhead, onSelect, onSeek, onRe
           </div>
         </div>
       </SortableContext>
-      <DragOverlay dropAnimation={null}>{activeClip ? <TimelineClipFace clip={activeClip} position={clips.findIndex((clip) => clip.id === activeClip.id) + 1} overlay /> : null}</DragOverlay>
+      <DragOverlay dropAnimation={null}>{activeClip ? <TimelineClipFace clip={activeClip} sourceUrl={jobsById.get(activeClip.jobId)?.contentUrl} position={clips.findIndex((clip) => clip.id === activeClip.id) + 1} overlay /> : null}</DragOverlay>
     </DndContext>
   );
 }
 
-function SortableTimelineClip({ clip, position, selected, active, setClipNode, onSelect }: {
+function SortableTimelineClip({ clip, sourceUrl, position, selected, active, setClipNode, onSelect }: {
   clip: ProjectClip;
+  sourceUrl?: string;
   position: number;
   selected: boolean;
   active: boolean;
@@ -340,11 +342,12 @@ function SortableTimelineClip({ clip, position, selected, active, setClipNode, o
     setClipNode(clip.id, node);
   }, [clip.id, setClipNode, setNodeRef]);
   const style: CSSProperties = { transform: CSS.Transform.toString(transform), transition };
-  return <TimelineClipFace ref={setCombinedNodeRef} clip={clip} position={position} selected={selected} dragging={active || isDragging} style={style} onClick={onSelect} attributes={attributes} listeners={listeners} />;
+  return <TimelineClipFace ref={setCombinedNodeRef} clip={clip} sourceUrl={sourceUrl} position={position} selected={selected} dragging={active || isDragging} style={style} onClick={onSelect} attributes={attributes} listeners={listeners} />;
 }
 
 type TimelineClipFaceProps = {
   clip: ProjectClip;
+  sourceUrl?: string;
   position: number;
   selected?: boolean;
   dragging?: boolean;
@@ -355,8 +358,8 @@ type TimelineClipFaceProps = {
   listeners?: ButtonHTMLAttributes<HTMLButtonElement>;
 };
 
-const TimelineClipFace = forwardRef<HTMLButtonElement, TimelineClipFaceProps>(({ clip, position, selected = false, dragging = false, overlay = false, style, onClick, attributes, listeners }, ref) => {
-  const { loading, url } = useLocalGeneratedVideoUrl(clip.jobId);
+const TimelineClipFace = forwardRef<HTMLButtonElement, TimelineClipFaceProps>(({ clip, sourceUrl, position, selected = false, dragging = false, overlay = false, style, onClick, attributes, listeners }, ref) => {
+  const { loading, url } = useLocalGeneratedVideoUrl(clip.jobId, sourceUrl);
   return <button
       ref={ref}
       type="button"
@@ -373,8 +376,9 @@ const TimelineClipFace = forwardRef<HTMLButtonElement, TimelineClipFaceProps>(({
 });
 TimelineClipFace.displayName = "TimelineClipFace";
 
-function ProjectPreview({ clips, selectedClipId, aspect, seekTarget, onSelectClip, onPosition, onUpdateClip, onRemoveClip }: {
+function ProjectPreview({ clips, jobsById, selectedClipId, aspect, seekTarget, onSelectClip, onPosition, onUpdateClip, onRemoveClip }: {
   clips: ProjectClip[];
+  jobsById: Map<string, Job>;
   selectedClipId: string | null;
   aspect: AspectId;
   seekTarget: ProjectSeekTarget | null;
@@ -388,7 +392,7 @@ function ProjectPreview({ clips, selectedClipId, aspect, seekTarget, onSelectCli
   const advancingRef = useRef(false);
   const selectedIndex = Math.max(0, clips.findIndex((clip) => clip.id === selectedClipId));
   const clip = clips[selectedIndex] ?? null;
-  const localVideo = useLocalGeneratedVideoUrl(clip?.jobId ?? null);
+  const localVideo = useLocalGeneratedVideoUrl(clip?.jobId ?? null, clip ? jobsById.get(clip.jobId)?.contentUrl : null);
 
   const advancePreview = useCallback((shouldContinue: boolean) => {
     const next = clips[selectedIndex + 1];

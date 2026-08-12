@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { loadGeneratedVideoUrl } from "../lib/generatedVideos";
+import { loadOrCacheGeneratedVideoUrl } from "../lib/generatedVideos";
 
 type LocalVideoState = {
   jobId: string | null;
@@ -7,7 +7,7 @@ type LocalVideoState = {
   url: string | null;
 };
 
-export function useLocalGeneratedVideoUrl(jobId: string | null) {
+export function useLocalGeneratedVideoUrl(jobId: string | null, sourceUrl?: string | null) {
   const [state, setState] = useState<LocalVideoState>({ jobId: null, loading: false, url: null });
 
   useEffect(() => {
@@ -17,7 +17,7 @@ export function useLocalGeneratedVideoUrl(jobId: string | null) {
     }
     let active = true;
     setState({ jobId, loading: true, url: null });
-    void loadGeneratedVideoUrl(jobId)
+    void loadOrCacheGeneratedVideoUrl(jobId, sourceUrl)
       .then((url) => {
         if (active) setState({ jobId, loading: false, url });
       })
@@ -25,7 +25,7 @@ export function useLocalGeneratedVideoUrl(jobId: string | null) {
         if (active) setState({ jobId, loading: false, url: null });
       });
     return () => { active = false; };
-  }, [jobId]);
+  }, [jobId, sourceUrl]);
 
   return state.jobId === jobId
     ? { loading: state.loading, url: state.url }

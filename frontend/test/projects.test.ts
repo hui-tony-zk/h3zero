@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { clipDuration, makeProjectClip, moveProjectClip, normalizeClip, projectMembershipsByJob, reorderProjectClips, restoreProjects } from "../src/lib/projects";
+import { clipDuration, clipFractionAtSourceTime, makeProjectClip, moveProjectClip, normalizeClip, projectMembershipsByJob, reorderProjectClips, restoreProjects, sourceTimeAtClipFraction } from "../src/lib/projects";
 import type { Job, LocalProject, ProjectClip } from "../src/types";
 
 const clip = (id: string, order: number): ProjectClip => ({
@@ -28,6 +28,14 @@ test("clip edits stay within the source duration", () => {
   assert.equal(normalized.outPoint, 10);
   assert.equal(normalized.playbackRate, 1);
   assert.equal(clipDuration({ ...normalized, playbackRate: 2 }), 0.5);
+});
+
+test("project playhead maps trimmed clip positions in both directions", () => {
+  const trimmed = { ...clip("seek", 0), inPoint: 1, outPoint: 5, sourceDuration: 8 };
+  assert.equal(sourceTimeAtClipFraction(trimmed, 0.5), 3);
+  assert.equal(clipFractionAtSourceTime(trimmed, 3), 0.5);
+  assert.equal(sourceTimeAtClipFraction(trimmed, -1), 1);
+  assert.equal(clipFractionAtSourceTime(trimmed, 20), 1);
 });
 
 test("project restore rejects unsupported records and normalizes clip order", () => {

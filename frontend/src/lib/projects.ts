@@ -20,6 +20,16 @@ export function clipDuration(clip: ProjectClip) {
   return Math.max(MIN_CLIP_SECONDS, clip.outPoint - clip.inPoint) / clip.playbackRate;
 }
 
+export function clipFractionAtSourceTime(clip: ProjectClip, sourceTime: number) {
+  const sourceSpan = Math.max(MIN_CLIP_SECONDS, clip.outPoint - clip.inPoint);
+  return Math.max(0, Math.min(1, (sourceTime - clip.inPoint) / sourceSpan));
+}
+
+export function sourceTimeAtClipFraction(clip: ProjectClip, fraction: number) {
+  const boundedFraction = Math.max(0, Math.min(1, fraction));
+  return clip.inPoint + (clip.outPoint - clip.inPoint) * boundedFraction;
+}
+
 export function normalizeClip(clip: ProjectClip): ProjectClip {
   const sourceDuration = Math.max(MIN_CLIP_SECONDS, finiteNumber(clip.sourceDuration, 5));
   const inPoint = Math.max(0, Math.min(sourceDuration - MIN_CLIP_SECONDS, finiteNumber(clip.inPoint, 0)));

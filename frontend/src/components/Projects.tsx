@@ -29,13 +29,16 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { clipDuration, MIN_CLIP_SECONDS } from "../lib/projects";
+import { clipDuration, clipFractionAtSourceTime, MIN_CLIP_SECONDS, sourceTimeAtClipFraction } from "../lib/projects";
 import type { AspectId, Job, LocalProject, ProjectClip } from "../types";
 import { RemixIcon } from "./icons";
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
 const TIMELINE_DRAG_HOLD_MS = 250;
 const TIMELINE_SCROLL_CANCEL_X_PX = 6;
+
+type ProjectPlayhead = { clipId: string; sourceTime: number };
+type ProjectSeekTarget = ProjectPlayhead & { requestId: number };
 
 function formatSeconds(value: number) {
   const minutes = Math.floor(value / 60);
@@ -132,6 +135,9 @@ function ProjectEditor({ project, jobs, onRename, onSetAspect, onDelete, onUpdat
 }) {
   const orderedClips = useMemo(() => [...project.clips].sort((a, b) => a.order - b.order), [project.clips]);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(orderedClips[0]?.id ?? null);
+  const [playhead, setPlayhead] = useState<ProjectPlayhead | null>(() => orderedClips[0] ? { clipId: orderedClips[0].id, sourceTime: orderedClips[0].inPoint } : null);
+  const [seekTarget, setSeekTarget] = useState<ProjectSeekTarget | null>(null);
+  const seekRequestIdRef = useRef(0);
   const [name, setName] = useState(project.name);
   const selectedClip = orderedClips.find((clip) => clip.id === selectedClipId) ?? orderedClips[0] ?? null;
   const selectedIndex = selectedClip ? orderedClips.findIndex((clip) => clip.id === selectedClip.id) : -1;
@@ -139,9 +145,33 @@ function ProjectEditor({ project, jobs, onRename, onSetAspect, onDelete, onUpdat
   const totalDuration = orderedClips.reduce((sum, clip) => sum + clipDuration(clip), 0);
 
   useEffect(() => {
-    if (!selectedClip && orderedClips[0]) setSelectedClipId(orderedClips[0].id);
-    if (selectedClipId && !orderedClips.some((clip) => clip.id === selectedClipId)) setSelectedClipId(orderedClips[0]?.id ?? null);
+    if (!selectedClip && orderedClips[0]) {
+      setSelectedClipId(orderedClips[0].id);
+      setPlayhead({ clipId: orderedClips[0].id, sourceTime: orderedClips[0].inPoint });
+    }
+    if (selectedClipId && !orderedClips.some((clip) => clip.id === selectedClipId)) {
+      setSelectedClipId(orderedClips[0]?.id ?? null);
+      setPlayhead(orderedClips[0] ? { clipId: orderedClips[0].id, sourceTime: orderedClips[0].inPoint } : null);
+    }
   }, [orderedClips, selectedClip, selectedClipId]);
+
+  const seekPreview = useCallback((clipId: string, sourceTime: number) => {
+    const clip = orderedClips.find((candidate) => candidate.id === clipId);
+    if (!clip) return;
+    const boundedTime = Math.max(clip.inPoint, Math.min(clip.outPoint, sourceTime));
+    const target = { clipId, sourceTime: boundedTime, requestId: ++seekRequestIdRef.current };
+    setSelectedClipId(clipId);
+    setPlayhead(target);
+    setSeekTarget(target);
+  }, [orderedClips]);
+
+  const selectPreviewClip = useCallback((clipId: string) => {
+    const clip = orderedClips.find((candidate) => candidate.id === clipId);
+    if (clip) seekPreview(clipId, clip.inPoint);
+  }, [orderedClips, seekPreview]);
+  const updatePreviewPosition = useCallback((clipId: string, sourceTime: number) => {
+    setPlayhead({ clipId, sourceTime });
+  }, []);
 
   return (
     <div className="flex min-h-[calc(100dvh-5.25rem)] flex-col">
@@ -153,27 +183,30 @@ function ProjectEditor({ project, jobs, onRename, onSetAspect, onDelete, onUpdat
       </header>
 
       <div className="grid min-h-0 flex-1 grid-rows-[minmax(300px,1fr)_auto] lg:grid-cols-[minmax(0,1fr)_260px] lg:grid-rows-[minmax(0,1fr)_auto]">
-        <ProjectPreview clips={orderedClips} jobsById={jobsById} selectedClipId={selectedClip?.id ?? null} aspect={project.aspect} onSelectClip={setSelectedClipId} onUpdateClip={onUpdateClip} />
+        <ProjectPreview clips={orderedClips} jobsById={jobsById} selectedClipId={selectedClip?.id ?? null} aspect={project.aspect} seekTarget={seekTarget} onSelectClip={selectPreviewClip} onPosition={updatePreviewPosition} onUpdateClip={onUpdateClip} />
         <AnimatePresence mode="wait">
           <ClipInspector key={selectedClip?.id ?? "empty"} clip={selectedClip} job={selectedClip ? jobsById.get(selectedClip.jobId) ?? null : null} index={selectedIndex} clipCount={orderedClips.length} onUpdate={onUpdateClip} onRemove={(clipId) => onRemoveClip(clipId)} onMove={onMoveClip} onRemix={onRemix} />
         </AnimatePresence>
         <div className="border-t border-white/7 lg:col-span-2">
           <div className="flex items-center justify-between px-4 py-2.5 sm:px-5"><span className="text-[9px] font-bold uppercase tracking-[0.16em] text-white/32">Timeline</span><button type="button" onClick={onOpenLibrary} className="flex items-center gap-1.5 text-[10px] font-semibold text-reelo-accent hover:text-white"><Plus size={12} /> Add from videos</button></div>
-          {orderedClips.length ? <TimelineStrip clips={orderedClips} jobsById={jobsById} selectedClipId={selectedClip?.id ?? null} onSelect={setSelectedClipId} onReorder={onReorderClips} /> : <div className="px-5 pb-5 text-[11px] text-white/35">No clips yet. Add a completed result from Videos.</div>}
+          {orderedClips.length ? <TimelineStrip clips={orderedClips} jobsById={jobsById} selectedClipId={selectedClip?.id ?? null} playhead={playhead} onSelect={selectPreviewClip} onSeek={seekPreview} onReorder={onReorderClips} /> : <div className="px-5 pb-5 text-[11px] text-white/35">No clips yet. Add a completed result from Videos.</div>}
         </div>
       </div>
     </div>
   );
 }
 
-function TimelineStrip({ clips, jobsById, selectedClipId, onSelect, onReorder }: {
+function TimelineStrip({ clips, jobsById, selectedClipId, playhead, onSelect, onSeek, onReorder }: {
   clips: ProjectClip[];
   jobsById: Map<string, Job>;
   selectedClipId: string | null;
+  playhead: ProjectPlayhead | null;
   onSelect: (id: string) => void;
+  onSeek: (clipId: string, sourceTime: number) => void;
   onReorder: (fromId: string, toId: string) => void;
 }) {
   const [activeClipId, setActiveClipId] = useState<string | null>(null);
+  const [seeking, setSeeking] = useState(false);
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: TIMELINE_DRAG_HOLD_MS, tolerance: { x: TIMELINE_SCROLL_CANCEL_X_PX } } }),
@@ -182,6 +215,10 @@ function TimelineStrip({ clips, jobsById, selectedClipId, onSelect, onReorder }:
   const itemIds = clips.map((clip) => clip.id);
   const activeClip = activeClipId ? clips.find((clip) => clip.id === activeClipId) ?? null : null;
   const clipNodesRef = useRef<Map<string, HTMLButtonElement>>(new Map());
+  const playheadClip = clips.find((clip) => clip.id === playhead?.clipId) ?? clips.find((clip) => clip.id === selectedClipId) ?? clips[0];
+  const playheadIndex = clips.findIndex((clip) => clip.id === playheadClip?.id);
+  const playheadFraction = playheadClip ? clipFractionAtSourceTime(playheadClip, playhead?.clipId === playheadClip.id ? playhead.sourceTime : playheadClip.inPoint) : 0;
+  const playheadStyle: CSSProperties = { left: `calc(${Math.max(0, playheadIndex)} * (9rem + 0.5rem) + ${playheadFraction} * 9rem)` };
 
   const setClipNode = useCallback((clipId: string, node: HTMLButtonElement | null) => {
     if (node) clipNodesRef.current.set(clipId, node);
@@ -189,9 +226,9 @@ function TimelineStrip({ clips, jobsById, selectedClipId, onSelect, onReorder }:
   }, []);
 
   useEffect(() => {
-    if (activeClipId || !selectedClipId) return;
+    if (activeClipId || seeking || !selectedClipId) return;
     clipNodesRef.current.get(selectedClipId)?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
-  }, [activeClipId, selectedClipId]);
+  }, [activeClipId, seeking, selectedClipId]);
 
   const handleDragStart = (event: DragStartEvent) => setActiveClipId(String(event.active.id));
   const handleDragEnd = (event: DragEndEvent) => {
@@ -200,11 +237,85 @@ function TimelineStrip({ clips, jobsById, selectedClipId, onSelect, onReorder }:
     onReorder(String(event.active.id), String(event.over.id));
   };
 
+  const seekAtClientX = useCallback((clientX: number) => {
+    const candidates = clips.flatMap((clip) => {
+      const node = clipNodesRef.current.get(clip.id);
+      return node ? [{ clip, rect: node.getBoundingClientRect() }] : [];
+    });
+    if (!candidates.length) return;
+    let target = candidates.find(({ rect }) => clientX >= rect.left && clientX <= rect.right) ?? candidates[0];
+    if (clientX < target.rect.left || clientX > target.rect.right) {
+      let closestDistance = Number.POSITIVE_INFINITY;
+      candidates.forEach((candidate) => {
+        const distance = clientX < candidate.rect.left ? candidate.rect.left - clientX : clientX - candidate.rect.right;
+        if (distance < closestDistance) {
+          closestDistance = distance;
+          target = candidate;
+        }
+      });
+    }
+    const fraction = Math.max(0, Math.min(1, (clientX - target.rect.left) / Math.max(1, target.rect.width)));
+    onSeek(target.clip.id, sourceTimeAtClipFraction(target.clip, fraction));
+  }, [clips, onSeek]);
+
+  const nudgePlayhead = useCallback((delta: number) => {
+    if (!playheadClip) return;
+    const currentTime = playhead?.clipId === playheadClip.id ? playhead.sourceTime : playheadClip.inPoint;
+    const nextTime = currentTime + delta;
+    if (nextTime < playheadClip.inPoint && playheadIndex > 0) {
+      const previous = clips[playheadIndex - 1];
+      onSeek(previous.id, previous.outPoint);
+      return;
+    }
+    if (nextTime > playheadClip.outPoint && playheadIndex < clips.length - 1) {
+      const next = clips[playheadIndex + 1];
+      onSeek(next.id, next.inPoint);
+      return;
+    }
+    onSeek(playheadClip.id, nextTime);
+  }, [clips, onSeek, playhead, playheadClip, playheadIndex]);
+
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} autoScroll={false} onDragStart={handleDragStart} onDragCancel={() => setActiveClipId(null)} onDragEnd={handleDragEnd}>
       <SortableContext items={itemIds} strategy={horizontalListSortingStrategy}>
-        <div className="flex gap-2 overflow-x-auto px-4 pb-4 sm:px-5" aria-label="Project timeline">
-          {clips.map((clip, index) => <SortableTimelineClip key={clip.id} clip={clip} job={jobsById.get(clip.jobId)} position={index + 1} selected={clip.id === selectedClipId} active={clip.id === activeClipId} setClipNode={setClipNode} onSelect={() => onSelect(clip.id)} />)}
+        <div className="overflow-x-auto px-4 pb-4 pt-2 sm:px-5" aria-label="Project timeline">
+          <div className="relative flex w-max gap-2">
+            {clips.map((clip, index) => <SortableTimelineClip key={clip.id} clip={clip} job={jobsById.get(clip.jobId)} position={index + 1} selected={clip.id === selectedClipId} active={clip.id === activeClipId} setClipNode={setClipNode} onSelect={() => onSelect(clip.id)} />)}
+            {playheadClip && <button
+              type="button"
+              role="slider"
+              aria-label="Project playhead"
+              aria-valuemin={playheadClip.inPoint}
+              aria-valuemax={playheadClip.outPoint}
+              aria-valuenow={playhead?.sourceTime ?? playheadClip.inPoint}
+              aria-valuetext={`Clip ${playheadIndex + 1}, ${formatSeconds(playhead?.sourceTime ?? playheadClip.inPoint)}`}
+              title="Drag to seek"
+              className="absolute -top-2 z-30 h-[6.5rem] w-5 -translate-x-1/2 touch-none cursor-ew-resize outline-none focus-visible:ring-2 focus-visible:ring-reelo-accent/70"
+              style={playheadStyle}
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => {
+                if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+                event.preventDefault();
+                nudgePlayhead(event.key === "ArrowLeft" ? -0.1 : 0.1);
+              }}
+              onPointerDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                setSeeking(true);
+                event.currentTarget.setPointerCapture(event.pointerId);
+                seekAtClientX(event.clientX);
+              }}
+              onPointerMove={(event) => {
+                if (event.currentTarget.hasPointerCapture(event.pointerId)) seekAtClientX(event.clientX);
+              }}
+              onPointerUp={() => setSeeking(false)}
+              onPointerCancel={() => setSeeking(false)}
+              onLostPointerCapture={() => setSeeking(false)}
+            >
+              <span className="absolute left-1/2 top-0 size-2.5 -translate-x-1/2 rotate-45 rounded-[2px] bg-reelo-accent shadow-[0_0_12px_rgba(71,181,255,.6)]" />
+              <span className="absolute bottom-0 left-1/2 top-1.5 w-px -translate-x-1/2 bg-reelo-accent shadow-[0_0_8px_rgba(71,181,255,.65)]" />
+            </button>}
+          </div>
         </div>
       </SortableContext>
       <DragOverlay dropAnimation={null}>{activeClip ? <TimelineClipFace clip={activeClip} job={jobsById.get(activeClip.jobId)} position={clips.findIndex((clip) => clip.id === activeClip.id) + 1} overlay /> : null}</DragOverlay>
@@ -263,12 +374,14 @@ const TimelineClipFace = forwardRef<HTMLButtonElement, TimelineClipFaceProps>(({
 ));
 TimelineClipFace.displayName = "TimelineClipFace";
 
-function ProjectPreview({ clips, jobsById, selectedClipId, aspect, onSelectClip, onUpdateClip }: {
+function ProjectPreview({ clips, jobsById, selectedClipId, aspect, seekTarget, onSelectClip, onPosition, onUpdateClip }: {
   clips: ProjectClip[];
   jobsById: Map<string, Job>;
   selectedClipId: string | null;
   aspect: AspectId;
+  seekTarget: ProjectSeekTarget | null;
   onSelectClip: (id: string) => void;
+  onPosition: (clipId: string, sourceTime: number) => void;
   onUpdateClip: (clipId: string, patch: Partial<ProjectClip>) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -284,6 +397,7 @@ function ProjectPreview({ clips, jobsById, selectedClipId, aspect, onSelectClip,
     if (!next) {
       advancingRef.current = false;
       continuePlaybackRef.current = false;
+      videoRef.current?.pause();
       return;
     }
     advancingRef.current = shouldContinue;
@@ -294,8 +408,17 @@ function ProjectPreview({ clips, jobsById, selectedClipId, aspect, onSelectClip,
     const video = videoRef.current;
     if (!video || !clip) return;
     video.playbackRate = clip.playbackRate;
-    if (video.currentTime < clip.inPoint || video.currentTime > clip.outPoint) video.currentTime = clip.inPoint;
-  }, [clip]);
+    if (video.readyState >= 1 && (video.currentTime < clip.inPoint || video.currentTime > clip.outPoint)) {
+      video.currentTime = clip.inPoint;
+      onPosition(clip.id, clip.inPoint);
+    }
+  }, [clip?.id, clip?.inPoint, clip?.outPoint, clip?.playbackRate, onPosition]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !clip || video.readyState < 1 || seekTarget?.clipId !== clip.id) return;
+    video.currentTime = Math.max(clip.inPoint, Math.min(clip.outPoint, seekTarget.sourceTime));
+  }, [clip?.id, seekTarget?.requestId]);
 
   return (
     <section className="flex min-h-0 items-center justify-center overflow-hidden bg-[radial-gradient(circle_at_50%_20%,rgba(66,172,255,.08),transparent_45%)] p-5 sm:p-8">
@@ -309,8 +432,10 @@ function ProjectPreview({ clips, jobsById, selectedClipId, aspect, onSelectClip,
           className="max-h-[52dvh] max-w-full rounded-xl bg-black object-contain shadow-[0_22px_70px_rgba(0,0,0,.45)]"
           onLoadedMetadata={(event) => {
             const video = event.currentTarget;
-            video.currentTime = Math.min(clip.inPoint, Math.max(0, video.duration - 0.05));
+            const requestedTime = seekTarget?.clipId === clip.id ? seekTarget.sourceTime : clip.inPoint;
+            video.currentTime = Math.min(Math.max(clip.inPoint, requestedTime), Math.max(0, video.duration - 0.05));
             video.playbackRate = clip.playbackRate;
+            onPosition(clip.id, video.currentTime);
             if (Number.isFinite(video.duration) && Math.abs(video.duration - clip.sourceDuration) > 0.1) {
               const usedFullSource = Math.abs(clip.outPoint - clip.sourceDuration) < 0.1;
               onUpdateClip(clip.id, { sourceDuration: video.duration, outPoint: usedFullSource ? video.duration : Math.min(clip.outPoint, video.duration) });
@@ -323,6 +448,7 @@ function ProjectPreview({ clips, jobsById, selectedClipId, aspect, onSelectClip,
           onPlay={() => { continuePlaybackRef.current = true; }}
           onPause={() => { if (!advancingRef.current) continuePlaybackRef.current = false; }}
           onTimeUpdate={(event) => {
+            onPosition(clip.id, event.currentTarget.currentTime);
             if (advancingRef.current || event.currentTarget.currentTime < clip.outPoint - 0.03) return;
             advancePreview(!event.currentTarget.paused && continuePlaybackRef.current);
           }}

@@ -47,14 +47,16 @@ export function GenerationSettingsDialog({ job, onClose }: { job: Job; onClose: 
           {sections.map((section) => (
             <section key={section.title} className="border-b border-white/7 py-4 last:border-b-0">
               <h3 className="mb-2.5 text-[9px] font-bold uppercase tracking-[0.17em] text-reelo-accent/80">{section.title}</h3>
-              <dl className="space-y-2.5">
+              {section.text !== undefined ? (
+                <p className="whitespace-pre-wrap break-words text-[11px] leading-5 text-white/78">{section.text}</p>
+              ) : <dl className="space-y-2.5">
                 {section.items.map(({ label, value }, index) => (
                   <div key={`${label}-${index}`} className="grid grid-cols-[minmax(7rem,0.8fr)_minmax(0,1.4fr)] gap-4 text-[11px] leading-4">
                     <dt className="text-white/42">{label}</dt>
                     <dd className="min-w-0 break-words text-right font-medium text-white/78">{value}</dd>
                   </div>
                 ))}
-              </dl>
+              </dl>}
             </section>
           ))}
         </div>

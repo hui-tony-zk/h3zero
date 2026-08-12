@@ -2,7 +2,7 @@ import { profileLabel } from "./sampling";
 import type { Job, SamplingProfileId } from "../types";
 
 export type GenerationSetting = { label: string; value: string };
-export type GenerationSettingSection = { title: string; items: GenerationSetting[] };
+export type GenerationSettingSection = { title: string; items: GenerationSetting[]; text?: string };
 
 const profileSteps: Record<SamplingProfileId, number> = {
   turbo_4: 4,
@@ -110,5 +110,6 @@ export function generationSettingSections(job: Job): GenerationSettingSection[] 
     { title: "Output", items: output },
     { title: "Sampling", items: sampling },
     ...(acceleration.length ? [{ title: "Acceleration & LoRAs", items: acceleration }] : []),
+    { title: "Prompt", items: [], text: job.prompt.trim() || "No prompt saved." },
   ];
 }

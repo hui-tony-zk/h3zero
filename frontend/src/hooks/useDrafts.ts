@@ -4,7 +4,7 @@ import { getFavoriteAsset } from "../lib/api/client";
 import { readCloudSyncUsername } from "../lib/cloudSync";
 import { emptyFramesDraft, emptyReferencesDraft, readDrafts, writeDrafts } from "../lib/storage/draftRepository";
 import { promptDocumentToText, promptTextToDocument, prunePromptDocument, replaceReferenceInPromptDocument, restoreReferenceTokens } from "../lib/promptDocument";
-import { isTurboProfile } from "../lib/sampling";
+import { isTurboProfile, samplingProfileId } from "../lib/sampling";
 import type { BaseDraft, DraftCollection, GenerationMode, Job, MediaAsset, SamplingProfileId } from "../types";
 
 const defaults: DraftCollection = { frames: emptyFramesDraft(), references: emptyReferencesDraft() };
@@ -72,7 +72,7 @@ export function useDrafts() {
 
   const restoreInputs = useCallback(async (job: Job) => {
     const savedProfile = job.metadata?.sampling_profile ?? job.samplingProfile ?? (job.turbo ? "turbo_4" : "spectrum") as SamplingProfileId;
-    const samplingProfile = (savedProfile === "turbo_4" || savedProfile === "turbo_8" ? "turbo_4" : "spectrum") as SamplingProfileId;
+    const samplingProfile = samplingProfileId({ samplingProfile: savedProfile, turbo: job.turbo });
     const seed = "random" as const;
     const resolution = "480p" as const;
     const restoreAsset = async (id: string) => {

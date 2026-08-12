@@ -10,6 +10,7 @@ import { buildReferenceInsertion } from "../src/lib/promptRecipes";
 import { describeFavoriteAssets, mergeFavoriteSnapshot, parseFavoriteSnapshot } from "../src/lib/favorites";
 import { normalizeCloudSyncUsername } from "../src/lib/cloudSync";
 import { generationSettingSections } from "../src/lib/generationSettings";
+import { samplingProfileId } from "../src/lib/sampling";
 import type { Job } from "../src/types";
 import { emptyFramesDraft, emptyReferencesDraft } from "../src/lib/storage/draftRepository";
 import { asset } from "./fixtures";
@@ -99,7 +100,13 @@ test("new drafts default to two generations", () => {
   assert.equal(emptyFramesDraft().turbo, true);
 });
 
-test("generation settings expose resolved metadata without the prompt", () => {
+test("remix profile restoration preserves every explicit sampling profile", () => {
+  for (const profile of ["turbo_4", "turbo_8", "spectrum", "base"] as const) {
+    assert.equal(samplingProfileId({ samplingProfile: profile, turbo: profile.startsWith("turbo_") }), profile);
+  }
+});
+
+test("generation settings expose resolved metadata with the prompt last", () => {
   const job = {
     id: "settings-job", mode: "frames", prompt: "private prompt text", duration: 5,
     aspect: "9:16", turbo: true, samplingProfile: "turbo_4", seed: "random",
@@ -119,8 +126,8 @@ test("generation settings expose resolved metadata without the prompt", () => {
   assert.equal(flat.find((entry) => entry.label === "Seed")?.value, "987654");
   assert.equal(flat.find((entry) => entry.label === "Output size")?.value, "768 × 1344");
   assert.equal(flat.find((entry) => entry.label === "Generation time")?.value, "1m 2s · sampling → video ready");
-  assert.equal(flat.some((entry) => entry.label.toLowerCase().includes("prompt")), false);
-  assert.equal(JSON.stringify(sections).includes(job.prompt), false);
+  assert.equal(sections.at(-1)?.title, "Prompt");
+  assert.equal(sections.at(-1)?.text, job.prompt);
   const withoutStart = generationSettingSections({ ...job, samplingStartedAt: undefined });
   assert.equal(withoutStart.flatMap((section) => section.items).some((entry) => entry.label === "Generation time"), false);
 });

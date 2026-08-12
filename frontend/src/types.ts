@@ -242,3 +242,24 @@ export interface JobStatusResponse extends JobCreateResponse {
   videoUrl?: string;
   progress?: JobProgress;
 }
+
+export interface ProjectClip {
+  id: string;
+  jobId: string;
+  inPoint: number;
+  outPoint: number;
+  sourceDuration: number;
+  playbackRate: number;
+  order: number;
+  createdAt: number;
+}
+
+export interface LocalProject {
+  schemaVersion: 1;
+  id: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+  aspect: AspectId;
+  clips: ProjectClip[];
+}

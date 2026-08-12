@@ -90,6 +90,7 @@ local catalog is not committed and each deployment keeps its own selection.
 - Track durable jobs from queue through loading, sampling, and decoding
 - Cache completed videos in local browser storage
 - Keep favorite videos and remix sources durably in Modal
+- Arrange favorited results in local projects with drag-to-reorder, trimming, speed controls, and sequential preview
 
 ![Two completed durable video jobs in H3Zero](docs/images/h3-video-carousel.png)
 

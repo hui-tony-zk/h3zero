@@ -71,7 +71,11 @@ test("new project clips use canonical H3 output duration", () => {
     contentUrl: "/api/video",
     metadata: { duration_seconds: 15 },
   } satisfies Job;
-  assert.equal(makeProjectClip(job, 0).outPoint, 15);
+  const projectClip = makeProjectClip(job, 0);
+  assert.equal(projectClip.outPoint, 15);
+  assert.equal(projectClip.jobId, job.id);
+  assert.equal("contentUrl" in projectClip, false);
+  assert.equal("hearted" in projectClip, false);
 });
 
 test("project memberships group project chips by referenced job", () => {

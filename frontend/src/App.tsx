@@ -39,7 +39,6 @@ export default function App() {
   const [workspace, setWorkspace] = useState<"videos" | "projects">("videos");
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(() => projects.projects[0]?.id ?? null);
   const [projectPickerJob, setProjectPickerJob] = useState<Job | null>(null);
-  const [projectAddBusy, setProjectAddBusy] = useState(false);
   const [specs, setSpecs] = useState<H3Specs | null>(null);
   const [specError, setSpecError] = useState<string | null>(null);
   const [launching, setLaunching] = useState(false);
@@ -52,7 +51,6 @@ export default function App() {
   const [autoplayEnabled, setAutoplayEnabled] = useState(readAutoplayPreference);
   const pendingDeleteRef = useRef<{ job: Job; timer: number } | null>(null);
   const pendingFavoriteRef = useRef<Job | null>(null);
-  const pendingProjectAddRef = useRef<{ job: Job; projectId: string } | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -108,6 +106,10 @@ export default function App() {
   }, [addJobs, drafts, replaceJob, specError, specs, updateJob]);
 
   const finalizeDelete = useCallback((job: Job) => {
+    if (projects.referencedJobIds.has(job.id)) {
+      setToast({ id: `project-delete-blocked:${job.id}:${Date.now()}`, message: "Remove this video from its projects before deleting it." });
+      return;
+    }
     removeJob(job.id);
     if (job.id.startsWith("upload:")) return;
     void deleteJob(job.id)
@@ -119,7 +121,7 @@ export default function App() {
           message: error instanceof Error ? "Could not delete result" : "Delete failed",
         });
       });
-  }, [addJobs, removeJob]);
+  }, [addJobs, projects.referencedJobIds, removeJob]);
 
   const undoDelete = useCallback(() => {
     if (!pendingDeleteRef.current) return;
@@ -180,8 +182,8 @@ export default function App() {
       onAction: () => openProject(projectId),
     });
   }, [openProject, projects.projects]);
-  const favoriteJob = useCallback(async (job: Job, username: string, options: { force?: boolean } = {}) => {
-    if (job.hearted && !options.force) return true;
+  const favoriteJob = useCallback(async (job: Job, username: string) => {
+    if (job.hearted) return true;
     if (favoritePendingIds.has(job.id)) return;
     const previousAssets = job.favoriteAssets;
     setFavoritePendingIds((current) => new Set(current).add(job.id));
@@ -215,10 +217,6 @@ export default function App() {
       await favoriteJob(job, username);
       return;
     }
-    if (projects.referencedJobIds.has(job.id)) {
-      setToast({ id: `project-favorite-blocked:${job.id}:${Date.now()}`, message: "This favorite backs a local project. Remove its clips before unfavoriting." });
-      return;
-    }
     if (favoritePendingIds.has(job.id)) return;
     const previousAssets = job.favoriteAssets;
     setFavoritePendingIds((current) => new Set(current).add(job.id));
@@ -235,7 +233,7 @@ export default function App() {
         return next;
       });
     }
-  }, [favoriteJob, favoritePendingIds, projects.referencedJobIds, updateJob]);
+  }, [favoriteJob, favoritePendingIds, updateJob]);
   const requestFavorite = useCallback((job: Job) => {
     if (!cloudSyncUsername) {
       pendingFavoriteRef.current = job;
@@ -253,21 +251,9 @@ export default function App() {
     const pending = pendingFavoriteRef.current;
     pendingFavoriteRef.current = null;
     if (pending) await toggleFavorite(pending, normalized);
-    const pendingProject = pendingProjectAddRef.current;
-    pendingProjectAddRef.current = null;
-    if (pendingProject) {
-      setProjectAddBusy(true);
-      const saved = await favoriteJob(pendingProject.job, normalized, { force: true });
-      if (saved) {
-        projects.addJob(pendingProject.projectId, pendingProject.job);
-        showProjectAddedToast(pendingProject.projectId, pendingProject.job.id);
-      }
-      setProjectAddBusy(false);
-    }
-  }, [favoriteJob, projects, showProjectAddedToast, syncFavorites, toggleFavorite]);
+  }, [syncFavorites, toggleFavorite]);
   const closeCloudSync = useCallback(() => {
     pendingFavoriteRef.current = null;
-    pendingProjectAddRef.current = null;
     setCloudSyncOpen(false);
   }, []);
   const toggleAutoplay = useCallback(() => {
@@ -294,22 +280,11 @@ export default function App() {
     }
   }, [drafts]);
 
-  const addToProject = useCallback(async (job: Job, projectId: string) => {
-    if (!cloudSyncUsername) {
-      pendingProjectAddRef.current = { job, projectId };
-      setProjectPickerJob(null);
-      setCloudSyncOpen(true);
-      return;
-    }
-    setProjectAddBusy(true);
-    const saved = await favoriteJob(job, cloudSyncUsername, { force: true });
-    if (saved) {
-      projects.addJob(projectId, job);
-      setProjectPickerJob(null);
-      showProjectAddedToast(projectId, job.id);
-    }
-    setProjectAddBusy(false);
-  }, [cloudSyncUsername, favoriteJob, projects, showProjectAddedToast]);
+  const addToProject = useCallback((job: Job, projectId: string) => {
+    projects.addJob(projectId, job);
+    setProjectPickerJob(null);
+    showProjectAddedToast(projectId, job.id);
+  }, [projects, showProjectAddedToast]);
 
   const visibleJobs = pendingDeleteId ? jobs.filter((job) => job.id !== pendingDeleteId) : jobs;
   const projectMemberships = useMemo(() => projectMembershipsByJob(projects.projects), [projects.projects]);
@@ -326,7 +301,7 @@ export default function App() {
       </div>
       <nav className="pointer-events-auto flex rounded-full border border-white/7 bg-black/35 p-0.5 backdrop-blur-md" aria-label="Workspace"><button type="button" onClick={() => setWorkspace("videos")} className={`flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[9px] font-bold transition sm:px-3 ${workspace === "videos" ? "bg-white/10 text-white" : "text-white/38 hover:text-white/70"}`}><Film size={11} /> Videos</button><button type="button" onClick={() => setWorkspace("projects")} className={`flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[9px] font-bold transition sm:px-3 ${workspace === "projects" ? "bg-white/10 text-white" : "text-white/38 hover:text-white/70"}`}><Layers3 size={11} /> Projects</button></nav>
       <div className="pointer-events-auto ml-auto flex items-center gap-1">
-        <button type="button" onClick={() => { pendingFavoriteRef.current = null; pendingProjectAddRef.current = null; setCloudSyncOpen(true); }} className="flex min-h-8 min-w-0 items-center gap-1.5 rounded-full px-2 text-[10px] font-medium text-white/56 transition hover:bg-white/6 hover:text-white sm:px-2.5" title={cloudSyncUsername ? "Change Modal cloud sync name" : "Set up Modal cloud sync"}>
+        <button type="button" onClick={() => { pendingFavoriteRef.current = null; setCloudSyncOpen(true); }} className="flex min-h-8 min-w-0 items-center gap-1.5 rounded-full px-2 text-[10px] font-medium text-white/56 transition hover:bg-white/6 hover:text-white sm:px-2.5" title={cloudSyncUsername ? "Change Modal cloud sync name" : "Set up Modal cloud sync"}>
           <Cloud size={12} className={cloudSyncUsername ? "text-reelo-accent" : ""} />
           <span className="hidden max-w-[20vw] truncate sm:inline">{cloudSyncUsername ? `Synced as: ${cloudSyncUsername}` : "Modal cloud sync"}</span>
         </button>
@@ -356,7 +331,7 @@ export default function App() {
     {workspace === "videos" && <GithubStarPrompt visible={githubStarReminder.visible} onDismiss={githubStarReminder.dismiss} onStar={githubStarReminder.hideForever} />}
     {workspace === "videos" && specError && !specs && <p className="fixed inset-x-4 bottom-20 z-50 text-center text-xs text-red-300">{specError}</p>}
     {workspace === "videos" && <CommandBar draft={drafts.activeDraft} specs={specs} open={composerOpen} launching={launching} onOpenChange={setComposerOpen} onModeChange={drafts.setActiveMode} onUpdate={drafts.updateActiveDraft} onSetFrame={drafts.setFrame} onAddReferences={drafts.addReferences} onReplaceReference={drafts.replaceReference} onRemoveReference={drafts.removeReference} onLaunch={launch} />}
-    <AnimatePresence>{projectPickerJob && <ProjectPicker job={projectPickerJob} projects={projects.projects} busy={projectAddBusy} onCreate={projects.createProject} onAdd={(projectId) => void addToProject(projectPickerJob, projectId)} onClose={() => setProjectPickerJob(null)} />}</AnimatePresence>
+    <AnimatePresence>{projectPickerJob && <ProjectPicker job={projectPickerJob} projects={projects.projects} onCreate={projects.createProject} onAdd={(projectId) => addToProject(projectPickerJob, projectId)} onClose={() => setProjectPickerJob(null)} />}</AnimatePresence>
     <CloudSyncDialog open={cloudSyncOpen} currentUsername={cloudSyncUsername} onClose={closeCloudSync} onSubmit={connectCloudSync} />
     <Toast toast={toast} onDismiss={dismissToast} />
   </div>;

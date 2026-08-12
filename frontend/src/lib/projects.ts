@@ -7,6 +7,7 @@ export interface ProjectMembership {
 
 export const MIN_CLIP_SECONDS = 0.25;
 export const PROJECT_SCHEMA_VERSION = 1 as const;
+export const PROJECT_PLAYBACK_END_EPSILON = 0.03;
 
 function finiteNumber(value: unknown, fallback: number) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
@@ -28,6 +29,10 @@ export function clipFractionAtSourceTime(clip: ProjectClip, sourceTime: number) 
 export function sourceTimeAtClipFraction(clip: ProjectClip, fraction: number) {
   const boundedFraction = Math.max(0, Math.min(1, fraction));
   return clip.inPoint + (clip.outPoint - clip.inPoint) * boundedFraction;
+}
+
+export function isProjectPlaybackBoundary(clip: ProjectClip, sourceTime: number, ended = false) {
+  return ended || sourceTime >= clip.outPoint - PROJECT_PLAYBACK_END_EPSILON;
 }
 
 export function normalizeClip(clip: ProjectClip): ProjectClip {

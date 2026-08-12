@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { clipDuration, clipFractionAtSourceTime, makeProjectClip, moveProjectClip, normalizeClip, projectMembershipsByJob, reorderProjectClips, restoreProjects, sourceTimeAtClipFraction } from "../src/lib/projects";
+import { clipDuration, clipFractionAtSourceTime, isProjectPlaybackBoundary, makeProjectClip, moveProjectClip, normalizeClip, projectMembershipsByJob, reorderProjectClips, restoreProjects, sourceTimeAtClipFraction } from "../src/lib/projects";
 import type { Job, LocalProject, ProjectClip } from "../src/types";
 
 const clip = (id: string, order: number): ProjectClip => ({
@@ -36,6 +36,13 @@ test("project playhead maps trimmed clip positions in both directions", () => {
   assert.equal(clipFractionAtSourceTime(trimmed, 3), 0.5);
   assert.equal(sourceTimeAtClipFraction(trimmed, -1), 1);
   assert.equal(clipFractionAtSourceTime(trimmed, 20), 1);
+});
+
+test("project playback preserves play intent at a clip boundary", () => {
+  const trimmed = { ...clip("boundary", 0), outPoint: 4 };
+  assert.equal(isProjectPlaybackBoundary(trimmed, 3.9), false);
+  assert.equal(isProjectPlaybackBoundary(trimmed, 3.98), true);
+  assert.equal(isProjectPlaybackBoundary(trimmed, 2, true), true);
 });
 
 test("project restore rejects unsupported records and normalizes clip order", () => {

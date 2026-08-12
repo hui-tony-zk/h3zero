@@ -30,7 +30,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useLocalGeneratedVideoUrl } from "../hooks/useLocalGeneratedVideoUrl";
-import { clipDuration, clipFractionAtSourceTime, MIN_CLIP_SECONDS, sourceTimeAtClipFraction } from "../lib/projects";
+import { clipDuration, clipFractionAtSourceTime, isProjectPlaybackBoundary, MIN_CLIP_SECONDS, sourceTimeAtClipFraction } from "../lib/projects";
 import type { AspectId, Job, LocalProject, ProjectClip } from "../types";
 import { RemixIcon } from "./icons";
 
@@ -430,6 +430,7 @@ function ProjectPreview({ clips, jobsById, selectedClipId, aspect, seekTarget, o
           key={`${clip.id}:${localVideo.url}`}
           ref={videoRef}
           src={localVideo.url}
+          autoPlay={advancingRef.current && continuePlaybackRef.current}
           controls
           playsInline
           className="max-h-[52dvh] max-w-full rounded-xl bg-black object-contain shadow-[0_22px_70px_rgba(0,0,0,.45)]"
@@ -449,11 +450,15 @@ function ProjectPreview({ clips, jobsById, selectedClipId, aspect, seekTarget, o
             }
           }}
           onPlay={() => { continuePlaybackRef.current = true; }}
-          onPause={() => { if (!advancingRef.current) continuePlaybackRef.current = false; }}
+          onPause={(event) => {
+            if (!advancingRef.current && !isProjectPlaybackBoundary(clip, event.currentTarget.currentTime, event.currentTarget.ended)) {
+              continuePlaybackRef.current = false;
+            }
+          }}
           onTimeUpdate={(event) => {
             onPosition(clip.id, event.currentTarget.currentTime);
-            if (advancingRef.current || event.currentTarget.currentTime < clip.outPoint - 0.03) return;
-            advancePreview(!event.currentTarget.paused && continuePlaybackRef.current);
+            if (advancingRef.current || !isProjectPlaybackBoundary(clip, event.currentTarget.currentTime, event.currentTarget.ended)) return;
+            advancePreview(continuePlaybackRef.current);
           }}
           onEnded={() => { if (!advancingRef.current) advancePreview(continuePlaybackRef.current); }}
         />

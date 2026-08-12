@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Cloud, Film, Layers3 } from "lucide-react";
 import { CloudSyncDialog } from "./components/CloudSyncDialog";
@@ -18,6 +18,7 @@ import { describeFavoriteAssets } from "./lib/favorites";
 import { loadGeneratedVideoBlob, removeGeneratedVideo } from "./lib/generatedVideos";
 import { readCloudSyncUsername, writeCloudSyncUsername } from "./lib/cloudSync";
 import { pendingJob, uploadingJob } from "./lib/jobs";
+import { projectMembershipsByJob } from "./lib/projects";
 import type { H3Specs, Job } from "./types";
 
 const AUTOPLAY_STORAGE_KEY = "h3zero:autoplay";
@@ -166,6 +167,19 @@ export default function App() {
   const dismissToast = useCallback((id: string) => {
     setToast((current) => current?.id === id ? null : current);
   }, []);
+  const openProject = useCallback((projectId: string) => {
+    setSelectedProjectId(projectId);
+    setWorkspace("projects");
+  }, []);
+  const showProjectAddedToast = useCallback((projectId: string, jobId: string) => {
+    const projectName = projects.projects.find((project) => project.id === projectId)?.name ?? "Untitled project";
+    setToast({
+      id: `project-added:${jobId}:${Date.now()}`,
+      message: `Added to ${projectName}`,
+      actionLabel: "Open project",
+      onAction: () => openProject(projectId),
+    });
+  }, [openProject, projects.projects]);
   const favoriteJob = useCallback(async (job: Job, username: string, options: { force?: boolean } = {}) => {
     if (job.hearted && !options.force) return true;
     if (favoritePendingIds.has(job.id)) return;
@@ -246,12 +260,11 @@ export default function App() {
       const saved = await favoriteJob(pendingProject.job, normalized, { force: true });
       if (saved) {
         projects.addJob(pendingProject.projectId, pendingProject.job);
-        setSelectedProjectId(pendingProject.projectId);
-        setWorkspace("projects");
+        showProjectAddedToast(pendingProject.projectId, pendingProject.job.id);
       }
       setProjectAddBusy(false);
     }
-  }, [favoriteJob, projects, syncFavorites, toggleFavorite]);
+  }, [favoriteJob, projects, showProjectAddedToast, syncFavorites, toggleFavorite]);
   const closeCloudSync = useCallback(() => {
     pendingFavoriteRef.current = null;
     pendingProjectAddRef.current = null;
@@ -292,15 +305,14 @@ export default function App() {
     const saved = await favoriteJob(job, cloudSyncUsername, { force: true });
     if (saved) {
       projects.addJob(projectId, job);
-      setSelectedProjectId(projectId);
       setProjectPickerJob(null);
-      setWorkspace("projects");
-      setToast({ id: `project-added:${job.id}:${Date.now()}`, message: "Added to project and backed up in favorites." });
+      showProjectAddedToast(projectId, job.id);
     }
     setProjectAddBusy(false);
-  }, [cloudSyncUsername, favoriteJob, projects]);
+  }, [cloudSyncUsername, favoriteJob, projects, showProjectAddedToast]);
 
   const visibleJobs = pendingDeleteId ? jobs.filter((job) => job.id !== pendingDeleteId) : jobs;
+  const projectMemberships = useMemo(() => projectMembershipsByJob(projects.projects), [projects.projects]);
 
   return <div className="min-h-screen bg-reelo-bg text-reelo-text">
     <motion.header
@@ -339,7 +351,7 @@ export default function App() {
       </div>
     </motion.header>
     <AnimatePresence mode="wait">
-      {workspace === "videos" ? <motion.div key="videos" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}><JobCanvas jobs={visibleJobs} autoplayEnabled={autoplayEnabled} favoritePendingIds={favoritePendingIds} onFavorite={requestFavorite} onAddToProject={setProjectPickerJob} onRemix={(job) => void remix(job)} onDelete={remove} onCancel={cancel} /></motion.div> : <Projects key="projects" projects={projects.projects} jobs={jobs} selectedProjectId={selectedProjectId} onSelectProject={setSelectedProjectId} onCreateProject={projects.createProject} onRenameProject={projects.renameProject} onSetAspect={projects.setProjectAspect} onDeleteProject={projects.deleteProject} onUpdateClip={projects.updateClip} onRemoveClip={projects.removeClip} onReorderClips={projects.reorderClips} onMoveClip={projects.moveClip} onOpenLibrary={() => setWorkspace("videos")} onRemix={(job) => void remix(job)} />}
+      {workspace === "videos" ? <motion.div key="videos" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}><JobCanvas jobs={visibleJobs} projectMemberships={projectMemberships} autoplayEnabled={autoplayEnabled} favoritePendingIds={favoritePendingIds} onFavorite={requestFavorite} onAddToProject={setProjectPickerJob} onOpenProject={openProject} onRemix={(job) => void remix(job)} onDelete={remove} onCancel={cancel} /></motion.div> : <Projects key="projects" projects={projects.projects} jobs={jobs} selectedProjectId={selectedProjectId} onSelectProject={setSelectedProjectId} onCreateProject={projects.createProject} onRenameProject={projects.renameProject} onSetAspect={projects.setProjectAspect} onDeleteProject={projects.deleteProject} onUpdateClip={projects.updateClip} onRemoveClip={projects.removeClip} onReorderClips={projects.reorderClips} onMoveClip={projects.moveClip} onOpenLibrary={() => setWorkspace("videos")} onRemix={(job) => void remix(job)} />}
     </AnimatePresence>
     {workspace === "videos" && <GithubStarPrompt visible={githubStarReminder.visible} onDismiss={githubStarReminder.dismiss} onStar={githubStarReminder.hideForever} />}
     {workspace === "videos" && specError && !specs && <p className="fixed inset-x-4 bottom-20 z-50 text-center text-xs text-red-300">{specError}</p>}

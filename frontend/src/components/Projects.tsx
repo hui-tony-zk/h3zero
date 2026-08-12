@@ -1,4 +1,4 @@
-import { ArrowLeft, ChevronLeft, ChevronRight, Film, GripVertical, Pause, Play, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Film, GripVertical, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   forwardRef,
@@ -81,12 +81,10 @@ export function Projects({ projects, jobs, selectedProjectId, onSelectProject, o
           <div className="flex-1 overflow-y-auto px-2 pb-3">
             {projects.map((project) => <button key={project.id} type="button" onClick={() => onSelectProject(project.id)} className={`mb-0.5 flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-xs transition ${selectedProject?.id === project.id ? "bg-white/8 text-white" : "text-white/48 hover:bg-white/[.035] hover:text-white/75"}`}><span className="truncate">{project.name}</span><b className="ml-3 text-[9px] tabular-nums text-white/28">{project.clips.length}</b></button>)}
           </div>
-          <button type="button" onClick={onOpenLibrary} className="m-2 flex items-center gap-2 rounded-lg px-3 py-2.5 text-[11px] text-white/43 hover:bg-white/5 hover:text-white"><ArrowLeft size={13} /> Back to videos</button>
         </aside>
 
         <section className="min-w-0 flex-1">
           <div className="flex items-center gap-2 border-b border-white/7 p-3 md:hidden">
-            <button type="button" onClick={onOpenLibrary} className="flex size-9 items-center justify-center rounded-full text-white/50 hover:bg-white/7" aria-label="Back to videos"><ArrowLeft size={15} /></button>
             <select value={selectedProject?.id ?? ""} onChange={(event) => onSelectProject(event.target.value || null)} className="min-w-0 flex-1 rounded-lg border border-white/8 bg-white/[.035] px-3 py-2 text-xs text-white outline-none">
               {projects.map((project) => <option key={project.id} value={project.id}>{project.name} ({project.clips.length})</option>)}
             </select>
@@ -161,7 +159,7 @@ function ProjectEditor({ project, jobs, onRename, onSetAspect, onDelete, onUpdat
         </AnimatePresence>
         <div className="border-t border-white/7 lg:col-span-2">
           <div className="flex items-center justify-between px-4 py-2.5 sm:px-5"><span className="text-[9px] font-bold uppercase tracking-[0.16em] text-white/32">Timeline</span><button type="button" onClick={onOpenLibrary} className="flex items-center gap-1.5 text-[10px] font-semibold text-reelo-accent hover:text-white"><Plus size={12} /> Add from videos</button></div>
-          {orderedClips.length ? <TimelineStrip clips={orderedClips} jobsById={jobsById} selectedClipId={selectedClip?.id ?? null} onSelect={setSelectedClipId} onReorder={onReorderClips} /> : <div className="px-5 pb-5 text-[11px] text-white/35">No clips yet. Return to Videos and add a completed result.</div>}
+          {orderedClips.length ? <TimelineStrip clips={orderedClips} jobsById={jobsById} selectedClipId={selectedClip?.id ?? null} onSelect={setSelectedClipId} onReorder={onReorderClips} /> : <div className="px-5 pb-5 text-[11px] text-white/35">No clips yet. Add a completed result from Videos.</div>}
         </div>
       </div>
     </div>
@@ -274,17 +272,23 @@ function ProjectPreview({ clips, jobsById, selectedClipId, aspect, onSelectClip,
   onUpdateClip: (clipId: string, patch: Partial<ProjectClip>) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [playingSequence, setPlayingSequence] = useState(false);
+  const continuePlaybackRef = useRef(false);
+  const advancingRef = useRef(false);
   const selectedIndex = Math.max(0, clips.findIndex((clip) => clip.id === selectedClipId));
   const clip = clips[selectedIndex] ?? null;
   const job = clip ? jobsById.get(clip.jobId) : null;
 
-  const selectNext = () => {
-    if (!clip) return;
+  const advancePreview = useCallback((shouldContinue: boolean) => {
     const next = clips[selectedIndex + 1];
-    if (next) onSelectClip(next.id);
-    else setPlayingSequence(false);
-  };
+    continuePlaybackRef.current = shouldContinue;
+    if (!next) {
+      advancingRef.current = false;
+      continuePlaybackRef.current = false;
+      return;
+    }
+    advancingRef.current = shouldContinue;
+    onSelectClip(next.id);
+  }, [clips, onSelectClip, selectedIndex]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -293,14 +297,9 @@ function ProjectPreview({ clips, jobsById, selectedClipId, aspect, onSelectClip,
     if (video.currentTime < clip.inPoint || video.currentTime > clip.outPoint) video.currentTime = clip.inPoint;
   }, [clip]);
 
-  useEffect(() => {
-    if (!playingSequence || !videoRef.current || !job?.contentUrl) return;
-    void videoRef.current.play().catch(() => setPlayingSequence(false));
-  }, [job?.contentUrl, playingSequence, selectedClipId]);
-
   return (
     <section className="flex min-h-0 items-center justify-center overflow-hidden bg-[radial-gradient(circle_at_50%_20%,rgba(66,172,255,.08),transparent_45%)] p-5 sm:p-8">
-      {clip && job?.contentUrl ? <div className="relative flex max-h-full max-w-full items-center justify-center" style={{ aspectRatio: aspect.replace(":", "/") }}>
+      {clip && job?.contentUrl ? <div className="flex max-h-full max-w-full items-center justify-center" style={{ aspectRatio: aspect.replace(":", "/") }}>
         <video
           key={`${clip.id}:${job.contentUrl}`}
           ref={videoRef}
@@ -316,23 +315,19 @@ function ProjectPreview({ clips, jobsById, selectedClipId, aspect, onSelectClip,
               const usedFullSource = Math.abs(clip.outPoint - clip.sourceDuration) < 0.1;
               onUpdateClip(clip.id, { sourceDuration: video.duration, outPoint: usedFullSource ? video.duration : Math.min(clip.outPoint, video.duration) });
             }
-            if (playingSequence) void video.play();
-          }}
-          onTimeUpdate={(event) => {
-            if (event.currentTarget.currentTime >= clip.outPoint - 0.03) {
-              event.currentTarget.pause();
-              if (playingSequence) selectNext();
+            if (advancingRef.current && continuePlaybackRef.current) {
+              advancingRef.current = false;
+              void video.play().catch(() => { continuePlaybackRef.current = false; });
             }
           }}
-          onEnded={() => { if (playingSequence) selectNext(); }}
+          onPlay={() => { continuePlaybackRef.current = true; }}
+          onPause={() => { if (!advancingRef.current) continuePlaybackRef.current = false; }}
+          onTimeUpdate={(event) => {
+            if (advancingRef.current || event.currentTarget.currentTime < clip.outPoint - 0.03) return;
+            advancePreview(!event.currentTarget.paused && continuePlaybackRef.current);
+          }}
+          onEnded={() => { if (!advancingRef.current) advancePreview(continuePlaybackRef.current); }}
         />
-        <button type="button" onClick={() => {
-          if (playingSequence) { setPlayingSequence(false); videoRef.current?.pause(); return; }
-          if (clips[0]) onSelectClip(clips[0].id);
-          setPlayingSequence(true);
-        }} className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/12 bg-black/72 px-3.5 py-2 text-[10px] font-bold text-white backdrop-blur-md hover:bg-black">
-          {playingSequence ? <Pause size={12} /> : <Play size={12} fill="currentColor" />}{playingSequence ? "Pause sequence" : "Play sequence"}
-        </button>
       </div> : <div className="text-center"><Film size={24} className="mx-auto text-white/18" /><p className="mt-3 text-xs text-white/35">{clip ? "This local reference is unavailable." : "Add a video to begin your sequence."}</p></div>}
     </section>
   );

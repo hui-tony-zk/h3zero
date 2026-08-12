@@ -1,5 +1,10 @@
 import type { AspectId, Job, LocalProject, ProjectClip } from "../types";
 
+export interface ProjectMembership {
+  id: string;
+  name: string;
+}
+
 export const MIN_CLIP_SECONDS = 0.25;
 export const PROJECT_SCHEMA_VERSION = 1 as const;
 
@@ -73,6 +78,19 @@ export function moveProjectClip(clips: ProjectClip[], clipId: string, delta: num
   const toIndex = Math.max(0, Math.min(ordered.length - 1, fromIndex + delta));
   if (fromIndex < 0 || fromIndex === toIndex) return ordered;
   return reorderProjectClips(ordered, clipId, ordered[toIndex].id);
+}
+
+export function projectMembershipsByJob(projects: LocalProject[]) {
+  const memberships = new Map<string, ProjectMembership[]>();
+  projects.forEach((project) => {
+    project.clips.forEach((clip) => {
+      const current = memberships.get(clip.jobId) ?? [];
+      if (!current.some(({ id }) => id === project.id)) {
+        memberships.set(clip.jobId, [...current, { id: project.id, name: project.name }]);
+      }
+    });
+  });
+  return memberships;
 }
 
 export function restoreProjects(value: unknown): LocalProject[] {

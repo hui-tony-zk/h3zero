@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { clipDuration, makeProjectClip, moveProjectClip, normalizeClip, reorderProjectClips, restoreProjects } from "../src/lib/projects";
-import type { Job, ProjectClip } from "../src/types";
+import { clipDuration, makeProjectClip, moveProjectClip, normalizeClip, projectMembershipsByJob, reorderProjectClips, restoreProjects } from "../src/lib/projects";
+import type { Job, LocalProject, ProjectClip } from "../src/types";
 
 const clip = (id: string, order: number): ProjectClip => ({
   id,
@@ -64,4 +64,22 @@ test("new project clips use canonical H3 output duration", () => {
     metadata: { duration_seconds: 15 },
   } satisfies Job;
   assert.equal(makeProjectClip(job, 0).outPoint, 15);
+});
+
+test("project memberships group project chips by referenced job", () => {
+  const project = (id: string, name: string, clips: ProjectClip[]): LocalProject => ({
+    schemaVersion: 1,
+    id,
+    name,
+    createdAt: 1,
+    updatedAt: 1,
+    aspect: "16:9",
+    clips,
+  });
+  const memberships = projectMembershipsByJob([
+    project("one", "Opening", [{ ...clip("a", 0), jobId: "shared" }]),
+    project("two", "Final cut", [{ ...clip("b", 0), jobId: "shared" }, { ...clip("c", 1), jobId: "solo" }]),
+  ]);
+  assert.deepEqual(memberships.get("shared"), [{ id: "one", name: "Opening" }, { id: "two", name: "Final cut" }]);
+  assert.deepEqual(memberships.get("solo"), [{ id: "two", name: "Final cut" }]);
 });

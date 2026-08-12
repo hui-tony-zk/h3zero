@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import { groupJobs } from "../lib/jobs";
 import { profileLabel } from "../lib/sampling";
 import { useGeneratedVideoUrl } from "../hooks/useGeneratedVideoUrl";
+import type { ProjectMembership } from "../lib/projects";
 import type { Job } from "../types";
 import { RemixIcon } from "./icons";
 import { GenerationSettingsDialog } from "./GenerationSettingsDialog";
@@ -43,7 +44,14 @@ function JobVideo({ job, autoplayEnabled, onPlaybackReady }: { job: Job; autopla
   return videoUrl ? <video data-h3-autoplay-video src={videoUrl} autoPlay={autoplayEnabled} loop muted playsInline preload={autoplayEnabled || isLocal ? "auto" : "metadata"} onLoadedMetadata={(event) => onPlaybackReady(event.currentTarget)} className="absolute inset-0 size-full bg-black object-contain" /> : null;
 }
 
-function FullscreenVideo({ job, autoplayEnabled, onPlaybackReady, onAddToProject, onClose }: { job: Job; autoplayEnabled: boolean; onPlaybackReady: PlaybackReady; onAddToProject: () => void; onClose: () => void }) {
+function ProjectChips({ memberships, onOpenProject, className = "" }: { memberships: ProjectMembership[]; onOpenProject: (projectId: string) => void; className?: string }) {
+  if (!memberships.length) return null;
+  return <div className={`flex max-w-[calc(100%-6rem)] flex-wrap gap-1 ${className}`} aria-label="Project memberships">
+    {memberships.map((project) => <button key={project.id} type="button" onClick={(event) => { event.stopPropagation(); onOpenProject(project.id); }} className="max-w-[16ch] truncate rounded-full border border-reelo-accent/28 bg-black/66 px-2 py-1 text-[9px] font-semibold text-reelo-accent backdrop-blur-md hover:border-reelo-accent/55 hover:bg-black" title={`Open ${project.name}`}>{project.name}</button>)}
+  </div>;
+}
+
+function FullscreenVideo({ job, memberships, autoplayEnabled, onPlaybackReady, onAddToProject, onOpenProject, onClose }: { job: Job; memberships: ProjectMembership[]; autoplayEnabled: boolean; onPlaybackReady: PlaybackReady; onAddToProject: () => void; onOpenProject: (projectId: string) => void; onClose: () => void }) {
   const videoUrl = useGeneratedVideoUrl(job);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -56,6 +64,7 @@ function FullscreenVideo({ job, autoplayEnabled, onPlaybackReady, onAddToProject
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-70 flex items-center justify-center bg-black/94 p-4 backdrop-blur-xl sm:p-8" role="dialog" aria-modal="true" aria-label="Video viewer">
       {videoUrl && <video data-h3-autoplay-video src={videoUrl} autoPlay={autoplayEnabled} loop controls playsInline onLoadedMetadata={(event) => onPlaybackReady(event.currentTarget)} className="max-h-full max-w-full object-contain" />}
+      <ProjectChips memberships={memberships} onOpenProject={onOpenProject} className="fixed left-4 top-4 sm:left-6 sm:top-6" />
       <div className="fixed right-4 top-4 flex gap-2 sm:right-6 sm:top-6">
         <button type="button" onClick={onAddToProject} className="flex size-10 items-center justify-center rounded-full border border-white/12 bg-black/60 text-white/80 backdrop-blur-md hover:bg-white/10 hover:text-reelo-accent" aria-label="Add video to project" title="Add to project"><FolderPlus size={16} /></button>
         {videoUrl && <a href={videoUrl} download={`h3-${job.id}.mp4`} className="flex size-10 items-center justify-center rounded-full border border-white/12 bg-black/60 text-white/80 backdrop-blur-md hover:bg-white/10 hover:text-white" aria-label="Download video" title="Download"><ArrowDownToLine size={16} /></a>}
@@ -65,13 +74,15 @@ function FullscreenVideo({ job, autoplayEnabled, onPlaybackReady, onAddToProject
   );
 }
 
-function JobCard({ job, autoplayEnabled, onPlaybackReady, favoritePending, onFavorite, onAddToProject, onRemix, onDelete, onCancel, onView, onSettings }: {
+function JobCard({ job, memberships, autoplayEnabled, onPlaybackReady, favoritePending, onFavorite, onAddToProject, onOpenProject, onRemix, onDelete, onCancel, onView, onSettings }: {
   job: Job;
+  memberships: ProjectMembership[];
   autoplayEnabled: boolean;
   onPlaybackReady: PlaybackReady;
   favoritePending: boolean;
   onFavorite: () => void;
   onAddToProject: () => void;
+  onOpenProject: (projectId: string) => void;
   onRemix: () => void;
   onDelete: () => void;
   onCancel: () => void;
@@ -117,6 +128,7 @@ function JobCard({ job, autoplayEnabled, onPlaybackReady, favoritePending, onFav
       >
         {samplingLabel}
       </span>
+      <ProjectChips memberships={memberships} onOpenProject={onOpenProject} className="absolute left-3 top-11 z-10" />
 
       {job.status === "completed" && <button
         type="button"
@@ -155,7 +167,7 @@ function JobCard({ job, autoplayEnabled, onPlaybackReady, favoritePending, onFav
   );
 }
 
-export function JobCanvas({ jobs, autoplayEnabled, favoritePendingIds, onFavorite, onAddToProject, onRemix, onDelete, onCancel }: { jobs: Job[]; autoplayEnabled: boolean; favoritePendingIds: Set<string>; onFavorite: (job: Job) => void; onAddToProject: (job: Job) => void; onRemix: (job: Job) => void; onDelete: (job: Job) => void; onCancel: (job: Job) => void }) {
+export function JobCanvas({ jobs, projectMemberships, autoplayEnabled, favoritePendingIds, onFavorite, onAddToProject, onOpenProject, onRemix, onDelete, onCancel }: { jobs: Job[]; projectMemberships: Map<string, ProjectMembership[]>; autoplayEnabled: boolean; favoritePendingIds: Set<string>; onFavorite: (job: Job) => void; onAddToProject: (job: Job) => void; onOpenProject: (projectId: string) => void; onRemix: (job: Job) => void; onDelete: (job: Job) => void; onCancel: (job: Job) => void }) {
   const [viewer, setViewer] = useState<Job | null>(null);
   const [settingsJob, setSettingsJob] = useState<Job | null>(null);
 
@@ -197,12 +209,12 @@ export function JobCanvas({ jobs, autoplayEnabled, favoritePendingIds, onFavorit
         <div className="flex h-full w-full gap-3 overflow-x-auto px-[9vw] [scrollbar-color:rgba(255,255,255,0.22)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb:hover]:bg-white/40 [&::-webkit-scrollbar-track]:mx-[12vw] [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-track]:bg-white/[0.045] sm:gap-5 sm:px-[12vw]" aria-label="Video batches">
           {batches.map((batch) => <section key={batch.id} aria-label="Generation batch" className="h-full shrink-0 overflow-y-auto overscroll-y-contain [scrollbar-color:rgba(255,255,255,0.16)_transparent] [scrollbar-width:thin]">
             <div style={batch.jobs.length > 1 ? { paddingTop: batchStartPadding(batch.jobs[0]) } : undefined} className={`flex min-h-full flex-col items-center gap-3 pb-4 sm:gap-5 ${batch.jobs.length === 1 ? "justify-center pt-4" : "justify-start"}`}>
-              {batch.jobs.map((job) => <JobCard key={job.id} job={job} autoplayEnabled={autoplayEnabled} onPlaybackReady={applyAutoplay} favoritePending={favoritePendingIds.has(job.id)} onFavorite={() => onFavorite(job)} onAddToProject={() => onAddToProject(job)} onRemix={() => onRemix(job)} onDelete={() => onDelete(job)} onCancel={() => onCancel(job)} onView={() => setViewer(job)} onSettings={() => setSettingsJob(job)} />)}
+              {batch.jobs.map((job) => <JobCard key={job.id} job={job} memberships={projectMemberships.get(job.id) ?? []} autoplayEnabled={autoplayEnabled} onPlaybackReady={applyAutoplay} favoritePending={favoritePendingIds.has(job.id)} onFavorite={() => onFavorite(job)} onAddToProject={() => onAddToProject(job)} onOpenProject={onOpenProject} onRemix={() => onRemix(job)} onDelete={() => onDelete(job)} onCancel={() => onCancel(job)} onView={() => setViewer(job)} onSettings={() => setSettingsJob(job)} />)}
             </div>
           </section>)}
         </div>
       </main>
-      <AnimatePresence>{viewer && <FullscreenVideo job={viewer} autoplayEnabled={autoplayEnabled} onPlaybackReady={applyAutoplay} onAddToProject={() => onAddToProject(viewer)} onClose={() => setViewer(null)} />}</AnimatePresence>
+      <AnimatePresence>{viewer && <FullscreenVideo job={viewer} memberships={projectMemberships.get(viewer.id) ?? []} autoplayEnabled={autoplayEnabled} onPlaybackReady={applyAutoplay} onAddToProject={() => onAddToProject(viewer)} onOpenProject={onOpenProject} onClose={() => setViewer(null)} />}</AnimatePresence>
       <AnimatePresence>{settingsJob && <GenerationSettingsDialog job={settingsJob} onClose={() => setSettingsJob(null)} />}</AnimatePresence>
     </>
   );

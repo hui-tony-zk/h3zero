@@ -33,7 +33,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { useLocalGeneratedVideoUrl } from "../hooks/useLocalGeneratedVideoUrl";
 import { ApiError, createProjectExport, getProjectExport } from "../lib/api/client";
 import { clearStoredProjectExport, downloadProjectExport, prepareProjectExportVideos, readStoredProjectExport, writeStoredProjectExport } from "../lib/projectExport";
-import { clipDuration, clipFractionAtSourceTime, isProjectPlaybackBoundary, MIN_CLIP_SECONDS, projectClipOpacity, sourceTimeAtClipFraction } from "../lib/projects";
+import { clipDuration, clipFractionAtSourceTime, isProjectPlaybackBoundary, MIN_CLIP_SECONDS, projectClipOpacity, shouldToggleProjectPlayback, sourceTimeAtClipFraction } from "../lib/projects";
 import type { AspectId, Job, LocalProject, ProjectClip, ProjectTransition } from "../types";
 import { RemixIcon } from "./icons";
 
@@ -541,6 +541,25 @@ function ProjectPreview({ clips, jobsById, selectedClipId, aspect, seekTarget, o
   useEffect(() => {
     if (videoRef.current) updatePreviewFade(videoRef.current);
   }, [updatePreviewFade]);
+
+  useEffect(() => {
+    const handlePlaybackShortcut = (event: KeyboardEvent) => {
+      const video = videoRef.current;
+      if (!video || !shouldToggleProjectPlayback(event)) return;
+      event.preventDefault();
+      if (!video.paused) {
+        video.pause();
+        return;
+      }
+      if (clip && isProjectPlaybackBoundary(clip, video.currentTime, video.ended)) {
+        video.currentTime = clip.inPoint;
+        onPosition(clip.id, clip.inPoint);
+      }
+      void video.play();
+    };
+    window.addEventListener("keydown", handlePlaybackShortcut);
+    return () => window.removeEventListener("keydown", handlePlaybackShortcut);
+  }, [clip, onPosition]);
 
   const advancePreview = useCallback((shouldContinue: boolean) => {
     const next = clips[selectedIndex + 1];

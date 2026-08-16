@@ -10,6 +10,7 @@ export const PROJECT_SCHEMA_VERSION = 1 as const;
 export const PROJECT_PLAYBACK_END_EPSILON = 0.03;
 export const PROJECT_TRANSITION_SECONDS = 0.3;
 export const PROJECT_PREVIEW_FPS = 30;
+const PROJECT_PLAYBACK_SHORTCUT_EXCLUSIONS = "input, textarea, select, button, a[href], video, [contenteditable]:not([contenteditable='false']), [role='slider']";
 
 function finiteNumber(value: unknown, fallback: number) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
@@ -35,6 +36,15 @@ export function sourceTimeAtClipFraction(clip: ProjectClip, fraction: number) {
 
 export function isProjectPlaybackBoundary(clip: ProjectClip, sourceTime: number, ended = false) {
   return ended || sourceTime >= clip.outPoint - PROJECT_PLAYBACK_END_EPSILON;
+}
+
+export function shouldToggleProjectPlayback(event: Pick<KeyboardEvent,
+  "altKey" | "code" | "ctrlKey" | "defaultPrevented" | "key" | "metaKey" | "repeat" | "shiftKey" | "target"
+>) {
+  if ((event.code !== "Space" && event.key !== " ") || event.repeat || event.defaultPrevented) return false;
+  if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return false;
+  const target = event.target as { closest?: (selectors: string) => Element | null } | null;
+  return !target?.closest?.(PROJECT_PLAYBACK_SHORTCUT_EXCLUSIONS);
 }
 
 export function projectClipFadeDuration(

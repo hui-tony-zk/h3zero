@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { clipDuration, clipFractionAtSourceTime, isProjectPlaybackBoundary, makeProjectClip, moveProjectClip, normalizeClip, projectClipFadeDuration, projectClipOpacity, projectMembershipsByJob, reorderProjectClips, restoreProjects, sourceTimeAtClipFraction } from "../src/lib/projects";
+import { clipDuration, clipFractionAtSourceTime, isProjectPlaybackBoundary, makeProjectClip, moveProjectClip, normalizeClip, projectClipFadeDuration, projectClipOpacity, projectMembershipsByJob, reorderProjectClips, restoreProjects, shouldToggleProjectPlayback, sourceTimeAtClipFraction } from "../src/lib/projects";
 import type { Job, LocalProject, ProjectClip } from "../src/types";
 
 const clip = (id: string, order: number): ProjectClip => ({
@@ -44,6 +44,26 @@ test("project playback preserves play intent at a clip boundary", () => {
   assert.equal(isProjectPlaybackBoundary(trimmed, 3.9), false);
   assert.equal(isProjectPlaybackBoundary(trimmed, 3.98), true);
   assert.equal(isProjectPlaybackBoundary(trimmed, 2, true), true);
+});
+
+test("space toggles project playback without stealing interactive controls", () => {
+  const event = (overrides: Record<string, unknown> = {}) => ({
+    altKey: false,
+    code: "Space",
+    ctrlKey: false,
+    defaultPrevented: false,
+    key: " ",
+    metaKey: false,
+    repeat: false,
+    shiftKey: false,
+    target: { closest: () => null },
+    ...overrides,
+  });
+  assert.equal(shouldToggleProjectPlayback(event()), true);
+  assert.equal(shouldToggleProjectPlayback(event({ repeat: true })), false);
+  assert.equal(shouldToggleProjectPlayback(event({ metaKey: true })), false);
+  assert.equal(shouldToggleProjectPlayback(event({ code: "Enter", key: "Enter" })), false);
+  assert.equal(shouldToggleProjectPlayback(event({ target: { closest: () => ({ tagName: "INPUT" }) } })), false);
 });
 
 test("project clips fade through black for 0.3 seconds between clips", () => {

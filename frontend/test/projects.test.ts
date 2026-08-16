@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { clipDuration, clipFractionAtSourceTime, isProjectPlaybackBoundary, makeProjectClip, moveProjectClip, normalizeClip, projectClipFadeDuration, projectClipOpacity, projectMembershipsByJob, reorderProjectClips, restoreProjects, shouldToggleProjectPlayback, sourceTimeAtClipFraction } from "../src/lib/projects";
+import { clipDuration, clipFractionAtSourceTime, isProjectPlaybackBoundary, makeProjectClip, moveProjectClip, normalizeClip, projectClipFadeDuration, projectClipOpacity, projectClipTrimValue, projectMembershipsByJob, reorderProjectClips, restoreProjects, shouldToggleProjectPlayback, sourceTimeAtClipFraction } from "../src/lib/projects";
 import type { Job, LocalProject, ProjectClip } from "../src/types";
 
 const clip = (id: string, order: number): ProjectClip => ({
@@ -29,6 +29,14 @@ test("clip edits stay within the source duration", () => {
   assert.equal(normalized.outPoint, 10);
   assert.equal(normalized.playbackRate, 1);
   assert.equal(clipDuration({ ...normalized, playbackRate: 2 }), 0.5);
+});
+
+test("project trim handles stay ordered and preserve the minimum clip length", () => {
+  const trimmed = { ...clip("handles", 0), inPoint: 1, outPoint: 4, sourceDuration: 8 };
+  assert.equal(projectClipTrimValue(trimmed, "start", -2), 0);
+  assert.equal(projectClipTrimValue(trimmed, "start", 7), 3.75);
+  assert.equal(projectClipTrimValue(trimmed, "end", 0), 1.25);
+  assert.equal(projectClipTrimValue(trimmed, "end", 20), 8);
 });
 
 test("project playhead maps trimmed clip positions in both directions", () => {

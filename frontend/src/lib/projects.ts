@@ -24,6 +24,16 @@ export function clipDuration(clip: ProjectClip) {
   return Math.max(MIN_CLIP_SECONDS, clip.outPoint - clip.inPoint) / clip.playbackRate;
 }
 
+export function projectClipTrimValue(clip: ProjectClip, edge: "start" | "end", seconds: number) {
+  if (edge === "start") {
+    return Math.min(clip.outPoint - MIN_CLIP_SECONDS, Math.max(0, seconds));
+  }
+  return Math.max(
+    clip.inPoint + MIN_CLIP_SECONDS,
+    Math.min(clip.sourceDuration, seconds),
+  );
+}
+
 export function clipFractionAtSourceTime(clip: ProjectClip, sourceTime: number) {
   const sourceSpan = Math.max(MIN_CLIP_SECONDS, clip.outPoint - clip.inPoint);
   return Math.max(0, Math.min(1, (sourceTime - clip.inPoint) / sourceSpan));

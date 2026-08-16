@@ -10,6 +10,8 @@ import {
   useState,
   type ButtonHTMLAttributes,
   type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
 import {
   closestCenter,
@@ -33,7 +35,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { useLocalGeneratedVideoUrl } from "../hooks/useLocalGeneratedVideoUrl";
 import { ApiError, createProjectExport, getProjectExport } from "../lib/api/client";
 import { clearStoredProjectExport, downloadProjectExport, prepareProjectExportVideos, readStoredProjectExport, writeStoredProjectExport } from "../lib/projectExport";
-import { clipDuration, clipFractionAtSourceTime, isProjectPlaybackBoundary, MIN_CLIP_SECONDS, projectClipOpacity, shouldToggleProjectPlayback, sourceTimeAtClipFraction } from "../lib/projects";
+import { clipDuration, clipFractionAtSourceTime, isProjectPlaybackBoundary, MIN_CLIP_SECONDS, projectClipOpacity, projectClipTrimValue, shouldToggleProjectPlayback, sourceTimeAtClipFraction } from "../lib/projects";
 import type { AspectId, Job, LocalProject, ProjectClip, ProjectTransition } from "../types";
 import { RemixIcon } from "./icons";
 
@@ -640,6 +642,91 @@ function ProjectPreview({ clips, jobsById, selectedClipId, aspect, seekTarget, o
   );
 }
 
+function ClipTrimControl({ clip, onUpdate }: {
+  clip: ProjectClip;
+  onUpdate: (patch: Partial<ProjectClip>) => void;
+}) {
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const sourceDuration = Math.max(MIN_CLIP_SECONDS, clip.sourceDuration);
+  const startPercent = (clip.inPoint / sourceDuration) * 100;
+  const endPercent = (clip.outPoint / sourceDuration) * 100;
+
+  const updateFromPointer = useCallback((edge: "start" | "end", clientX: number) => {
+    const rect = trackRef.current?.getBoundingClientRect();
+    if (!rect?.width) return;
+    const fraction = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const value = projectClipTrimValue(clip, edge, fraction * sourceDuration);
+    onUpdate(edge === "start" ? { inPoint: value } : { outPoint: value });
+  }, [clip, onUpdate, sourceDuration]);
+
+  const beginDrag = (edge: "start" | "end", event: ReactPointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    updateFromPointer(edge, event.clientX);
+  };
+
+  const continueDrag = (edge: "start" | "end", event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      updateFromPointer(edge, event.clientX);
+    }
+  };
+
+  const nudgeHandle = (edge: "start" | "end", event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    const current = edge === "start" ? clip.inPoint : clip.outPoint;
+    const step = event.shiftKey ? 0.25 : 0.05;
+    let next: number | null = null;
+    if (event.key === "ArrowLeft" || event.key === "ArrowDown") next = current - step;
+    if (event.key === "ArrowRight" || event.key === "ArrowUp") next = current + step;
+    if (event.key === "Home") next = edge === "start" ? 0 : clip.inPoint + MIN_CLIP_SECONDS;
+    if (event.key === "End") next = edge === "start" ? clip.outPoint - MIN_CLIP_SECONDS : sourceDuration;
+    if (next === null) return;
+    event.preventDefault();
+    const value = projectClipTrimValue(clip, edge, next);
+    onUpdate(edge === "start" ? { inPoint: value } : { outPoint: value });
+  };
+
+  const handle = (edge: "start" | "end", percent: number, value: number) => (
+    <button
+      type="button"
+      role="slider"
+      aria-label={`Trim ${edge}`}
+      aria-orientation="horizontal"
+      aria-valuemin={edge === "start" ? 0 : clip.inPoint + MIN_CLIP_SECONDS}
+      aria-valuemax={edge === "start" ? clip.outPoint - MIN_CLIP_SECONDS : sourceDuration}
+      aria-valuenow={value}
+      aria-valuetext={formatSeconds(value)}
+      title={`Trim ${edge}: ${formatSeconds(value)}`}
+      onKeyDown={(event) => nudgeHandle(edge, event)}
+      onPointerDown={(event) => beginDrag(edge, event)}
+      onPointerMove={(event) => continueDrag(edge, event)}
+      className="absolute inset-y-0 z-10 w-5 -translate-x-1/2 touch-none cursor-ew-resize rounded-sm bg-reelo-accent/90 p-0 transition-colors after:absolute after:inset-y-[15px] after:left-1/2 after:w-0.5 after:-translate-x-1/2 after:rounded-full after:bg-black/70 after:shadow-[-4px_0_0_rgba(0,0,0,.4),4px_0_0_rgba(0,0,0,.4)] hover:bg-[#66ccff] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+      style={{ left: `${percent}%` }}
+    />
+  );
+
+  return (
+    <div role="group" aria-label="Clip trim range">
+      <div className="flex items-center justify-between text-[10px] tabular-nums text-white/42">
+        <span><b className="mr-1.5 font-medium text-white/68">Start</b>{formatSeconds(clip.inPoint)}</span>
+        <span>{formatSeconds(clip.outPoint)}<b className="ml-1.5 font-medium text-white/68">End</b></span>
+      </div>
+      <div ref={trackRef} className="relative mt-2 h-12 touch-none">
+        <div
+          className="pointer-events-none absolute inset-0 overflow-hidden rounded-lg border border-reelo-accent/30 bg-[#050505]"
+          style={{ backgroundImage: "repeating-linear-gradient(45deg, rgba(255,255,255,.055) 0 7px, transparent 7px 11px)" }}
+        >
+          <div
+            className="absolute inset-y-0 border-x border-reelo-accent/45 bg-[linear-gradient(135deg,rgba(68,170,255,.28),rgba(255,255,255,.07))]"
+            style={{ left: `${startPercent}%`, width: `${Math.max(0, endPercent - startPercent)}%` }}
+          />
+        </div>
+        {handle("start", startPercent, clip.inPoint)}
+        {handle("end", endPercent, clip.outPoint)}
+      </div>
+    </div>
+  );
+}
+
 function ClipInspector({ clip, job, index, clipCount, onUpdate, onRemove, onMove, onRemix }: {
   clip: ProjectClip | null;
   job: Job | null;
@@ -651,14 +738,11 @@ function ClipInspector({ clip, job, index, clipCount, onUpdate, onRemove, onMove
   onRemix: (job: Job) => void;
 }) {
   if (!clip) return <motion.aside initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="border-t border-white/7 p-5 text-xs text-white/32 lg:border-l lg:border-t-0">Select a clip to edit it.</motion.aside>;
-  const maxStart = Math.max(0, clip.outPoint - MIN_CLIP_SECONDS);
-  const minEnd = Math.min(clip.sourceDuration, clip.inPoint + MIN_CLIP_SECONDS);
   return (
     <motion.aside initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -6 }} transition={{ duration: 0.16 }} className="border-t border-white/7 p-4 lg:border-l lg:border-t-0 lg:p-5">
       <div className="flex items-center justify-between"><div><span className="text-[9px] font-bold uppercase tracking-[0.16em] text-white/32">Clip {index + 1}</span><p className="mt-1 max-w-[21ch] truncate text-xs font-semibold text-white/75">{job?.prompt || "Unavailable video"}</p></div><div className="flex gap-1"><button type="button" disabled={index <= 0} onClick={() => onMove(clip.id, -1)} className="flex size-7 items-center justify-center rounded-full text-white/42 hover:bg-white/7 hover:text-white disabled:opacity-20" aria-label="Move clip left"><ChevronLeft size={14} /></button><button type="button" disabled={index >= clipCount - 1} onClick={() => onMove(clip.id, 1)} className="flex size-7 items-center justify-center rounded-full text-white/42 hover:bg-white/7 hover:text-white disabled:opacity-20" aria-label="Move clip right"><ChevronRight size={14} /></button></div></div>
       <div className="mt-6 space-y-5">
-        <label className="block"><span className="flex justify-between text-[10px] text-white/40"><b className="font-medium text-white/65">Start</b>{formatSeconds(clip.inPoint)}</span><input type="range" min={0} max={maxStart} step={0.05} value={clip.inPoint} onChange={(event) => onUpdate(clip.id, { inPoint: Number(event.target.value) })} className="mt-2 w-full accent-[#47b5ff]" /></label>
-        <label className="block"><span className="flex justify-between text-[10px] text-white/40"><b className="font-medium text-white/65">End</b>{formatSeconds(clip.outPoint)}</span><input type="range" min={minEnd} max={clip.sourceDuration} step={0.05} value={clip.outPoint} onChange={(event) => onUpdate(clip.id, { outPoint: Number(event.target.value) })} className="mt-2 w-full accent-[#47b5ff]" /></label>
+        <ClipTrimControl clip={clip} onUpdate={(patch) => onUpdate(clip.id, patch)} />
         <div><span className="text-[10px] font-medium text-white/65">Speed</span><div className="mt-2 grid grid-cols-3 gap-1">{SPEEDS.map((speed) => <button key={speed} type="button" onClick={() => onUpdate(clip.id, { playbackRate: speed })} className={`rounded-lg py-1.5 text-[9px] font-bold ${clip.playbackRate === speed ? "bg-reelo-accent text-black" : "bg-white/[.045] text-white/48 hover:bg-white/8 hover:text-white"}`}>{speed}×</button>)}</div></div>
         {index > 0 && <div><span className="text-[10px] font-medium text-white/65">Transition before</span><div className="mt-2 grid grid-cols-2 gap-1 rounded-lg bg-white/[.025] p-1">
           <button type="button" aria-pressed={clip.transitionIn === "cut"} onClick={() => onUpdate(clip.id, { transitionIn: "cut" })} className={`flex items-center justify-center gap-1.5 rounded-md py-1.5 text-[9px] font-bold transition-colors ${clip.transitionIn === "cut" ? "bg-white/10 text-white" : "text-white/38 hover:bg-white/[.055] hover:text-white/70"}`}><Scissors size={11} /> Cut</button>

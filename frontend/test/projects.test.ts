@@ -10,6 +10,7 @@ const clip = (id: string, order: number): ProjectClip => ({
   outPoint: 5,
   sourceDuration: 5,
   playbackRate: 1,
+  transitionIn: "fade-black",
   order,
   createdAt: 1,
 });
@@ -45,25 +46,39 @@ test("project playback preserves play intent at a clip boundary", () => {
   assert.equal(isProjectPlaybackBoundary(trimmed, 2, true), true);
 });
 
-test("project clips fade through black for half a second between clips", () => {
+test("project clips fade through black for 0.3 seconds between clips", () => {
   const first = clip("first", 0);
   const middle = clip("middle", 1);
-  assert.equal(projectClipFadeDuration(first, 0, 3), 0.5);
-  assert.equal(projectClipOpacity(first, 0, 3, 4.75), 0.5);
-  assert.equal(projectClipOpacity(first, 0, 3, 5), 0);
-  assert.equal(projectClipOpacity(middle, 1, 3, 0), 0);
-  assert.equal(projectClipOpacity(middle, 1, 3, 0.25), 0.5);
-  assert.equal(projectClipOpacity(middle, 1, 3, 0.5), 1);
+  const last = clip("last", 2);
+  const clips = [first, middle, last];
+  assert.equal(projectClipFadeDuration(clips, 0), 0.3);
+  assert.ok(Math.abs(projectClipOpacity(clips, 0, 4.85) - 0.5) < 1e-9);
+  assert.equal(projectClipOpacity(clips, 0, 5), 0);
+  assert.equal(projectClipOpacity(clips, 1, 0), 0);
+  assert.equal(projectClipOpacity(clips, 1, 0.15), 0.5);
+  assert.equal(projectClipOpacity(clips, 1, 0.3), 1);
 });
 
 test("project fades shorten to fit very brief clips", () => {
   const brief = { ...clip("brief", 1), outPoint: 0.25, sourceDuration: 0.25, playbackRate: 2 };
-  const fade = projectClipFadeDuration(brief, 1, 3, 30);
+  const clips = [clip("first", 0), brief, clip("last", 2)];
+  const fade = projectClipFadeDuration(clips, 1, 30);
   assert.ok(fade > 0);
   assert.ok(fade < 0.05);
-  assert.equal(projectClipOpacity(brief, 1, 3, 0), 0);
-  assert.equal(projectClipOpacity(brief, 1, 3, 0.125), 1);
-  assert.equal(projectClipOpacity(brief, 1, 3, 0.25), 0);
+  assert.equal(projectClipOpacity(clips, 1, 0), 0);
+  assert.equal(projectClipOpacity(clips, 1, 0.125), 1);
+  assert.equal(projectClipOpacity(clips, 1, 0.25), 0);
+});
+
+test("project transitions can use a hard cut at an individual boundary", () => {
+  const first = clip("first", 0);
+  const middle = { ...clip("middle", 1), transitionIn: "cut" as const };
+  const last = clip("last", 2);
+  const clips = [first, middle, last];
+  assert.equal(projectClipOpacity(clips, 0, 5), 1);
+  assert.equal(projectClipOpacity(clips, 1, 0), 1);
+  assert.equal(projectClipOpacity(clips, 1, 5), 0);
+  assert.equal(projectClipOpacity(clips, 2, 0), 0);
 });
 
 test("project restore rejects unsupported records and normalizes clip order", () => {
@@ -82,6 +97,7 @@ test("project restore rejects unsupported records and normalizes clip order", ()
   assert.equal(restored.length, 1);
   assert.equal(restored[0].aspect, "9:16");
   assert.deepEqual(restored[0].clips.map(({ order }) => order), [0, 1]);
+  assert.deepEqual(restored[0].clips.map(({ transitionIn }) => transitionIn), ["fade-black", "fade-black"]);
 });
 
 test("new project clips use canonical H3 output duration", () => {
@@ -102,6 +118,7 @@ test("new project clips use canonical H3 output duration", () => {
   const projectClip = makeProjectClip(job, 0);
   assert.equal(projectClip.outPoint, 15);
   assert.equal(projectClip.jobId, job.id);
+  assert.equal(projectClip.transitionIn, "fade-black");
   assert.equal("contentUrl" in projectClip, false);
   assert.equal("hearted" in projectClip, false);
 });

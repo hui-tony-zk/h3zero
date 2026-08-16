@@ -110,7 +110,7 @@ test("project export submits local MP4s and parses durable status", async () => 
     createdAt: 1,
     updatedAt: 1,
     aspect: "16:9",
-    clips: [{ id: "clip-one", jobId, inPoint: 1, outPoint: 4, sourceDuration: 5, playbackRate: 1.25, order: 0, createdAt: 1 }],
+    clips: [{ id: "clip-one", jobId, inPoint: 1, outPoint: 4, sourceDuration: 5, playbackRate: 1.25, transitionIn: "fade-black", order: 0, createdAt: 1 }],
   };
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
@@ -118,6 +118,7 @@ test("project export submits local MP4s and parses durable status", async () => 
     assert.equal(init?.method, "POST");
     const body = init?.body as FormData;
     assert.equal(JSON.parse(String(body.get("project"))).clips[0].jobId, jobId);
+    assert.equal(JSON.parse(String(body.get("project"))).clips[0].transitionIn, "fade-black");
     const video = body.get(`video_${jobId}`) as File;
     assert.deepEqual({ name: video.name, type: video.type, size: video.size }, { name: `${jobId}.mp4`, type: "video/mp4", size: 3 });
     return new Response(JSON.stringify({

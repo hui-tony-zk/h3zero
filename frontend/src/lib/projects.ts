@@ -8,7 +8,7 @@ export interface ProjectMembership {
 export const MIN_CLIP_SECONDS = 0.25;
 export const PROJECT_SCHEMA_VERSION = 1 as const;
 export const PROJECT_PLAYBACK_END_EPSILON = 0.03;
-export const PROJECT_TRANSITION_SECONDS = 0.5;
+export const PROJECT_TRANSITION_SECONDS = 0.3;
 export const PROJECT_PREVIEW_FPS = 30;
 
 function finiteNumber(value: unknown, fallback: number) {
@@ -38,30 +38,36 @@ export function isProjectPlaybackBoundary(clip: ProjectClip, sourceTime: number,
 }
 
 export function projectClipFadeDuration(
-  clip: ProjectClip,
+  clips: ProjectClip[],
   index: number,
-  clipCount: number,
   fps = PROJECT_PREVIEW_FPS,
 ) {
-  const fadeCount = Number(index > 0) + Number(index < clipCount - 1);
+  const clip = clips[index];
+  if (!clip) return 0;
+  const fadesIn = index > 0 && clip.transitionIn !== "cut";
+  const fadesOut = index < clips.length - 1 && clips[index + 1].transitionIn !== "cut";
+  const fadeCount = Number(fadesIn) + Number(fadesOut);
   if (!fadeCount) return 0;
   const fadeBudget = Math.max(0, clipDuration(clip) - 1 / Math.max(1, fps));
   return Math.min(PROJECT_TRANSITION_SECONDS, fadeBudget / fadeCount);
 }
 
 export function projectClipOpacity(
-  clip: ProjectClip,
+  clips: ProjectClip[],
   index: number,
-  clipCount: number,
   sourceTime: number,
   fps = PROJECT_PREVIEW_FPS,
 ) {
-  const fadeDuration = projectClipFadeDuration(clip, index, clipCount, fps);
+  const clip = clips[index];
+  if (!clip) return 1;
+  const fadesIn = index > 0 && clip.transitionIn !== "cut";
+  const fadesOut = index < clips.length - 1 && clips[index + 1].transitionIn !== "cut";
+  const fadeDuration = projectClipFadeDuration(clips, index, fps);
   if (!fadeDuration) return 1;
   const duration = clipDuration(clip);
   const elapsed = Math.max(0, Math.min(duration, (sourceTime - clip.inPoint) / clip.playbackRate));
-  const fadeIn = index > 0 ? elapsed / fadeDuration : 1;
-  const fadeOut = index < clipCount - 1 ? (duration - elapsed) / fadeDuration : 1;
+  const fadeIn = fadesIn ? elapsed / fadeDuration : 1;
+  const fadeOut = fadesOut ? (duration - elapsed) / fadeDuration : 1;
   return Math.max(0, Math.min(1, fadeIn, fadeOut));
 }
 
@@ -75,7 +81,8 @@ export function normalizeClip(clip: ProjectClip): ProjectClip {
   const playbackRate = [0.5, 0.75, 1, 1.25, 1.5, 2].includes(clip.playbackRate)
     ? clip.playbackRate
     : 1;
-  return { ...clip, inPoint, outPoint, sourceDuration, playbackRate };
+  const transitionIn = clip.transitionIn === "cut" ? "cut" : "fade-black";
+  return { ...clip, inPoint, outPoint, sourceDuration, playbackRate, transitionIn };
 }
 
 export function makeProject(name = "Untitled project", now = Date.now()): LocalProject {
@@ -102,6 +109,7 @@ export function makeProjectClip(job: Job, order: number, now = Date.now()): Proj
     outPoint: duration,
     sourceDuration: duration,
     playbackRate: 1,
+    transitionIn: "fade-black",
     order,
     createdAt: now,
   };
@@ -157,6 +165,7 @@ export function restoreProjects(value: unknown): LocalProject[] {
         outPoint: finiteNumber(clip.outPoint, 5),
         sourceDuration: finiteNumber(clip.sourceDuration, 5),
         playbackRate: finiteNumber(clip.playbackRate, 1),
+        transitionIn: clip.transitionIn === "cut" ? "cut" : "fade-black",
         order,
         createdAt: finiteNumber(clip.createdAt, createdAt),
       })];

@@ -1,7 +1,8 @@
-import { ChevronLeft, ChevronRight, Download, Film, GripVertical, LoaderCircle, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { Blend, ChevronLeft, ChevronRight, Download, Film, GripVertical, LoaderCircle, Plus, RotateCcw, Scissors, Trash2 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   forwardRef,
+  Fragment,
   useCallback,
   useEffect,
   useMemo,
@@ -33,7 +34,7 @@ import { useLocalGeneratedVideoUrl } from "../hooks/useLocalGeneratedVideoUrl";
 import { ApiError, createProjectExport, getProjectExport } from "../lib/api/client";
 import { clearStoredProjectExport, downloadProjectExport, prepareProjectExportVideos, readStoredProjectExport, writeStoredProjectExport } from "../lib/projectExport";
 import { clipDuration, clipFractionAtSourceTime, isProjectPlaybackBoundary, MIN_CLIP_SECONDS, projectClipOpacity, sourceTimeAtClipFraction } from "../lib/projects";
-import type { AspectId, Job, LocalProject, ProjectClip } from "../types";
+import type { AspectId, Job, LocalProject, ProjectClip, ProjectTransition } from "../types";
 import { RemixIcon } from "./icons";
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
@@ -276,14 +277,14 @@ function ProjectEditor({ project, jobs, onRename, onSetAspect, onDelete, onUpdat
         </AnimatePresence>
         <div className="border-t border-white/7 lg:col-span-2">
           <div className="flex items-center justify-between px-4 py-2.5 sm:px-5"><span className="text-[9px] font-bold uppercase tracking-[0.16em] text-white/32">Timeline</span><button type="button" onClick={onOpenLibrary} className="flex items-center gap-1.5 text-[10px] font-semibold text-reelo-accent hover:text-white"><Plus size={12} /> Add from videos</button></div>
-          {orderedClips.length ? <TimelineStrip clips={orderedClips} jobsById={jobsById} selectedClipId={selectedClip?.id ?? null} playhead={playhead} onSelect={selectPreviewClip} onSeek={seekPreview} onReorder={onReorderClips} /> : <div className="px-5 pb-5 text-[11px] text-white/35">No clips yet. Add a completed result from Videos.</div>}
+          {orderedClips.length ? <TimelineStrip clips={orderedClips} jobsById={jobsById} selectedClipId={selectedClip?.id ?? null} playhead={playhead} onSelect={selectPreviewClip} onSeek={seekPreview} onReorder={onReorderClips} onSetTransition={(clipId, transitionIn) => onUpdateClip(clipId, { transitionIn })} /> : <div className="px-5 pb-5 text-[11px] text-white/35">No clips yet. Add a completed result from Videos.</div>}
         </div>
       </div>
     </div>
   );
 }
 
-function TimelineStrip({ clips, jobsById, selectedClipId, playhead, onSelect, onSeek, onReorder }: {
+function TimelineStrip({ clips, jobsById, selectedClipId, playhead, onSelect, onSeek, onReorder, onSetTransition }: {
   clips: ProjectClip[];
   jobsById: Map<string, Job>;
   selectedClipId: string | null;
@@ -291,6 +292,7 @@ function TimelineStrip({ clips, jobsById, selectedClipId, playhead, onSelect, on
   onSelect: (id: string) => void;
   onSeek: (clipId: string, sourceTime: number) => void;
   onReorder: (fromId: string, toId: string) => void;
+  onSetTransition: (clipId: string, transitionIn: ProjectTransition) => void;
 }) {
   const [activeClipId, setActiveClipId] = useState<string | null>(null);
   const [seeking, setSeeking] = useState(false);
@@ -366,8 +368,11 @@ function TimelineStrip({ clips, jobsById, selectedClipId, playhead, onSelect, on
     <DndContext sensors={sensors} collisionDetection={closestCenter} autoScroll={false} onDragStart={handleDragStart} onDragCancel={() => setActiveClipId(null)} onDragEnd={handleDragEnd}>
       <SortableContext items={itemIds} strategy={horizontalListSortingStrategy}>
         <div className="overflow-x-auto px-4 pb-4 pt-2 sm:px-5" aria-label="Project timeline">
-          <div className="relative flex w-max gap-2">
-            {clips.map((clip, index) => <SortableTimelineClip key={clip.id} clip={clip} sourceUrl={jobsById.get(clip.jobId)?.contentUrl} position={index + 1} selected={clip.id === selectedClipId} active={clip.id === activeClipId} setClipNode={setClipNode} onSelect={() => onSelect(clip.id)} />)}
+          <div className="relative flex w-max">
+            {clips.map((clip, index) => <Fragment key={clip.id}>
+              <SortableTimelineClip clip={clip} sourceUrl={jobsById.get(clip.jobId)?.contentUrl} position={index + 1} selected={clip.id === selectedClipId} active={clip.id === activeClipId} setClipNode={setClipNode} onSelect={() => onSelect(clip.id)} />
+              {index < clips.length - 1 && <TransitionToggle incomingClip={clips[index + 1]} position={index + 2} onSetTransition={onSetTransition} />}
+            </Fragment>)}
             {playheadClip && <button
               type="button"
               role="slider"
@@ -408,6 +413,30 @@ function TimelineStrip({ clips, jobsById, selectedClipId, playhead, onSelect, on
       <DragOverlay dropAnimation={null}>{activeClip ? <TimelineClipFace clip={activeClip} sourceUrl={jobsById.get(activeClip.jobId)?.contentUrl} position={clips.findIndex((clip) => clip.id === activeClip.id) + 1} overlay /> : null}</DragOverlay>
     </DndContext>
   );
+}
+
+function TransitionToggle({ incomingClip, position, onSetTransition }: {
+  incomingClip: ProjectClip;
+  position: number;
+  onSetTransition: (clipId: string, transitionIn: ProjectTransition) => void;
+}) {
+  const enabled = incomingClip.transitionIn !== "cut";
+  const nextTransition = enabled ? "cut" : "fade-black";
+  const title = enabled
+    ? `Fade through black before clip ${position} · 0.3s. Click for a hard cut.`
+    : `Hard cut before clip ${position}. Click to fade through black.`;
+  return <div className="relative z-20 w-2 shrink-0">
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      aria-pressed={enabled}
+      onClick={() => onSetTransition(incomingClip.id, nextTransition)}
+      className={`absolute left-1/2 top-1/2 z-20 flex size-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border shadow-lg backdrop-blur-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-reelo-accent/70 ${enabled ? "border-reelo-accent/40 bg-[#07141c]/95 text-reelo-accent hover:border-reelo-accent/70 hover:bg-[#0a1c27]" : "border-white/12 bg-[#0d0d0f]/95 text-white/35 hover:border-white/25 hover:text-white/70"}`}
+    >
+      {enabled ? <Blend size={12} strokeWidth={2.2} /> : <Scissors size={11} strokeWidth={2.2} />}
+    </button>
+  </div>;
 }
 
 function SortableTimelineClip({ clip, sourceUrl, position, selected, active, setClipNode, onSelect }: {
@@ -484,9 +513,9 @@ function ProjectPreview({ clips, jobsById, selectedClipId, aspect, seekTarget, o
 
   const updatePreviewFade = useCallback((video: HTMLVideoElement) => {
     if (!clip || !fadeOverlayRef.current) return;
-    const opacity = projectClipOpacity(clip, selectedIndex, clips.length, video.currentTime);
+    const opacity = projectClipOpacity(clips, selectedIndex, video.currentTime);
     fadeOverlayRef.current.style.opacity = String(1 - opacity);
-  }, [clip, clips.length, selectedIndex]);
+  }, [clip, clips, selectedIndex]);
 
   const stopPreviewFade = useCallback(() => {
     if (fadeAnimationRef.current !== null) cancelAnimationFrame(fadeAnimationRef.current);
@@ -508,6 +537,10 @@ function ProjectPreview({ clips, jobsById, selectedClipId, aspect, seekTarget, o
     stopPreviewFade();
     return stopPreviewFade;
   }, [clip?.id, stopPreviewFade]);
+
+  useEffect(() => {
+    if (videoRef.current) updatePreviewFade(videoRef.current);
+  }, [updatePreviewFade]);
 
   const advancePreview = useCallback((shouldContinue: boolean) => {
     const next = clips[selectedIndex + 1];
@@ -608,6 +641,10 @@ function ClipInspector({ clip, job, index, clipCount, onUpdate, onRemove, onMove
         <label className="block"><span className="flex justify-between text-[10px] text-white/40"><b className="font-medium text-white/65">Start</b>{formatSeconds(clip.inPoint)}</span><input type="range" min={0} max={maxStart} step={0.05} value={clip.inPoint} onChange={(event) => onUpdate(clip.id, { inPoint: Number(event.target.value) })} className="mt-2 w-full accent-[#47b5ff]" /></label>
         <label className="block"><span className="flex justify-between text-[10px] text-white/40"><b className="font-medium text-white/65">End</b>{formatSeconds(clip.outPoint)}</span><input type="range" min={minEnd} max={clip.sourceDuration} step={0.05} value={clip.outPoint} onChange={(event) => onUpdate(clip.id, { outPoint: Number(event.target.value) })} className="mt-2 w-full accent-[#47b5ff]" /></label>
         <div><span className="text-[10px] font-medium text-white/65">Speed</span><div className="mt-2 grid grid-cols-3 gap-1">{SPEEDS.map((speed) => <button key={speed} type="button" onClick={() => onUpdate(clip.id, { playbackRate: speed })} className={`rounded-lg py-1.5 text-[9px] font-bold ${clip.playbackRate === speed ? "bg-reelo-accent text-black" : "bg-white/[.045] text-white/48 hover:bg-white/8 hover:text-white"}`}>{speed}×</button>)}</div></div>
+        {index > 0 && <div><span className="text-[10px] font-medium text-white/65">Transition before</span><div className="mt-2 grid grid-cols-2 gap-1 rounded-lg bg-white/[.025] p-1">
+          <button type="button" aria-pressed={clip.transitionIn === "cut"} onClick={() => onUpdate(clip.id, { transitionIn: "cut" })} className={`flex items-center justify-center gap-1.5 rounded-md py-1.5 text-[9px] font-bold transition-colors ${clip.transitionIn === "cut" ? "bg-white/10 text-white" : "text-white/38 hover:bg-white/[.055] hover:text-white/70"}`}><Scissors size={11} /> Cut</button>
+          <button type="button" aria-pressed={clip.transitionIn !== "cut"} onClick={() => onUpdate(clip.id, { transitionIn: "fade-black" })} className={`flex items-center justify-center gap-1.5 rounded-md py-1.5 text-[9px] font-bold transition-colors ${clip.transitionIn !== "cut" ? "bg-reelo-accent text-black" : "text-white/38 hover:bg-white/[.055] hover:text-white/70"}`}><Blend size={11} /> Fade · 0.3s</button>
+        </div></div>}
       </div>
       <div className="mt-6 flex gap-2"><button type="button" disabled={!job} onClick={() => job && onRemix(job)} className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-white/[.055] px-3 py-2 text-[10px] font-semibold text-white/68 hover:bg-white/10 hover:text-white disabled:opacity-35"><RemixIcon size={12} /> Remix</button><button type="button" onClick={() => onUpdate(clip.id, { inPoint: 0, outPoint: clip.sourceDuration, playbackRate: 1 })} className="flex size-8 items-center justify-center rounded-lg bg-white/[.055] text-white/50 hover:bg-white/10 hover:text-white" title="Reset edits"><RotateCcw size={12} /></button><button type="button" onClick={() => onRemove(clip.id)} className="flex size-8 items-center justify-center rounded-lg bg-white/[.055] text-white/45 hover:bg-red-500/15 hover:text-red-300" title="Remove from project"><Trash2 size={12} /></button></div>
     </motion.aside>

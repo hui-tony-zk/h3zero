@@ -243,6 +243,8 @@ export interface JobStatusResponse extends JobCreateResponse {
   progress?: JobProgress;
 }
 
+export type ProjectTransition = "fade-black" | "cut";
+
 export interface ProjectClip {
   id: string;
   jobId: string;
@@ -250,6 +252,7 @@ export interface ProjectClip {
   outPoint: number;
   sourceDuration: number;
   playbackRate: number;
+  transitionIn: ProjectTransition;
   order: number;
   createdAt: number;
 }

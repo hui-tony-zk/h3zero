@@ -34,10 +34,18 @@ class ProjectExportTests(unittest.TestCase):
         normalized = project_exports.normalize_project(self.project())
         self.assertEqual(normalized["aspect"], "9:16")
         self.assertEqual([clip["order"] for clip in normalized["clips"]], [0, 1])
+        self.assertEqual(
+            [clip["transitionIn"] for clip in normalized["clips"]],
+            ["fade-black", "fade-black"],
+        )
         invalid = self.project()
         invalid["clips"][0]["outPoint"] = 9
         with self.assertRaisesRegex(ValueError, "exceeds its source duration"):
             project_exports.normalize_project(invalid)
+        invalid_transition = self.project()
+        invalid_transition["clips"][1]["transitionIn"] = "cross-dissolve"
+        with self.assertRaisesRegex(ValueError, "unsupported transition"):
+            project_exports.normalize_project(invalid_transition)
 
     def test_ffmpeg_command_preserves_order_trim_speed_aspect_and_audio(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -54,8 +62,8 @@ class ProjectExportTests(unittest.TestCase):
             joined = " ".join(command)
             self.assertIn("scale=720:1280", joined)
             self.assertIn("setpts=(PTS-STARTPTS)/2.0", joined)
-            self.assertIn("fade=t=out:st=1.5:d=0.5:color=black", joined)
-            self.assertIn("fade=t=in:st=0:d=0.5:color=black", joined)
+            self.assertIn("fade=t=out:st=1.7:d=0.3:color=black", joined)
+            self.assertIn("fade=t=in:st=0:d=0.3:color=black", joined)
             self.assertIn("atempo=2.0", joined)
             self.assertIn("concat=n=2:v=1:a=1", joined)
             self.assertIn("-c:a aac", joined)
@@ -102,6 +110,24 @@ class ProjectExportTests(unittest.TestCase):
             )
             self.assertIn("fade=t=in:st=0:d=0.041666", middle_filter)
             self.assertIn("fade=t=out:st=0.083333", middle_filter)
+
+    def test_individual_transition_can_use_a_hard_cut(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = self.project()
+            project["clips"][1]["transitionIn"] = "cut"
+            record = project_exports.create_export(
+                "f" * 32,
+                project,
+                root=temporary,
+            )
+            command, _ = project_exports.build_ffmpeg_command(
+                record,
+                Path(temporary) / "render.mp4",
+                root=temporary,
+                include_audio=False,
+            )
+            joined = " ".join(command)
+            self.assertNotIn("fade=t=", joined)
 
 
 if __name__ == "__main__":

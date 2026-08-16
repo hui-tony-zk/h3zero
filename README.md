@@ -90,7 +90,7 @@ local catalog is not committed and each deployment keeps its own selection.
 - Track durable jobs from queue through loading, sampling, and decoding
 - Cache completed videos in local browser storage
 - Keep favorite videos and remix sources durably in Modal
-- Arrange device-cached results in local-only projects with drag-to-reorder, trimming, speed controls, 0.5-second fade-through-black transitions, sequential preview, and MP4 export
+- Arrange device-cached results in local-only projects with drag-to-reorder, trimming, speed controls, optional 0.3-second fade-through-black transitions, sequential preview, and MP4 export
 
 ![Two completed durable video jobs in H3Zero](docs/images/h3-video-carousel.png)
 

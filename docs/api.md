@@ -136,7 +136,9 @@ Projects remain browser-local. Export is the only operation that sends a
 project's cached media to Modal. `POST /api/project-exports` accepts multipart
 `project` JSON plus one MP4 field named `video_{job_id}` for every unique job
 referenced by the project. The snapshot supports 16:9 or 9:16 output, up to 24
-ordered clips, trim points, and playback rates from 0.5× through 2×.
+ordered clips, trim points, playback rates from 0.5× through 2×, and fixed
+0.5-second fade-through-black transitions between clips. Fades are shortened
+automatically when a clip is too brief for the full transition.
 
 Creation returns `202` and an export ID. Poll the status route until it reports
 `completed` or `failed`, then download `download_url`. Rendering runs on a

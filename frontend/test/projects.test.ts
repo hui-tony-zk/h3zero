@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { clipDuration, clipFractionAtSourceTime, isProjectPlaybackBoundary, makeProjectClip, moveProjectClip, normalizeClip, projectMembershipsByJob, reorderProjectClips, restoreProjects, sourceTimeAtClipFraction } from "../src/lib/projects";
+import { clipDuration, clipFractionAtSourceTime, isProjectPlaybackBoundary, makeProjectClip, moveProjectClip, normalizeClip, projectClipFadeDuration, projectClipOpacity, projectMembershipsByJob, reorderProjectClips, restoreProjects, sourceTimeAtClipFraction } from "../src/lib/projects";
 import type { Job, LocalProject, ProjectClip } from "../src/types";
 
 const clip = (id: string, order: number): ProjectClip => ({
@@ -43,6 +43,27 @@ test("project playback preserves play intent at a clip boundary", () => {
   assert.equal(isProjectPlaybackBoundary(trimmed, 3.9), false);
   assert.equal(isProjectPlaybackBoundary(trimmed, 3.98), true);
   assert.equal(isProjectPlaybackBoundary(trimmed, 2, true), true);
+});
+
+test("project clips fade through black for half a second between clips", () => {
+  const first = clip("first", 0);
+  const middle = clip("middle", 1);
+  assert.equal(projectClipFadeDuration(first, 0, 3), 0.5);
+  assert.equal(projectClipOpacity(first, 0, 3, 4.75), 0.5);
+  assert.equal(projectClipOpacity(first, 0, 3, 5), 0);
+  assert.equal(projectClipOpacity(middle, 1, 3, 0), 0);
+  assert.equal(projectClipOpacity(middle, 1, 3, 0.25), 0.5);
+  assert.equal(projectClipOpacity(middle, 1, 3, 0.5), 1);
+});
+
+test("project fades shorten to fit very brief clips", () => {
+  const brief = { ...clip("brief", 1), outPoint: 0.25, sourceDuration: 0.25, playbackRate: 2 };
+  const fade = projectClipFadeDuration(brief, 1, 3, 30);
+  assert.ok(fade > 0);
+  assert.ok(fade < 0.05);
+  assert.equal(projectClipOpacity(brief, 1, 3, 0), 0);
+  assert.equal(projectClipOpacity(brief, 1, 3, 0.125), 1);
+  assert.equal(projectClipOpacity(brief, 1, 3, 0.25), 0);
 });
 
 test("project restore rejects unsupported records and normalizes clip order", () => {

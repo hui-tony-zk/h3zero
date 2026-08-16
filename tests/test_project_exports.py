@@ -54,6 +54,8 @@ class ProjectExportTests(unittest.TestCase):
             joined = " ".join(command)
             self.assertIn("scale=720:1280", joined)
             self.assertIn("setpts=(PTS-STARTPTS)/2.0", joined)
+            self.assertIn("fade=t=out:st=1.5:d=0.5:color=black", joined)
+            self.assertIn("fade=t=in:st=0:d=0.5:color=black", joined)
             self.assertIn("atempo=2.0", joined)
             self.assertIn("concat=n=2:v=1:a=1", joined)
             self.assertIn("-c:a aac", joined)
@@ -71,6 +73,35 @@ class ProjectExportTests(unittest.TestCase):
             )
             self.assertEqual(removed, [export_id])
             self.assertFalse(project_exports.export_dir(export_id, root).exists())
+
+    def test_short_middle_clip_fades_are_shortened_without_overlapping(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = self.project()
+            short = {
+                "id": "clip-short",
+                "jobId": "c" * 32,
+                "inPoint": 0,
+                "outPoint": 0.25,
+                "sourceDuration": 0.25,
+                "playbackRate": 2,
+            }
+            project["clips"].insert(1, short)
+            record = project_exports.create_export(
+                "e" * 32,
+                project,
+                root=temporary,
+            )
+            command, _ = project_exports.build_ffmpeg_command(
+                record,
+                Path(temporary) / "render.mp4",
+                root=temporary,
+                include_audio=False,
+            )
+            middle_filter = next(
+                part for part in command if "[1:v]" in part
+            )
+            self.assertIn("fade=t=in:st=0:d=0.041666", middle_filter)
+            self.assertIn("fade=t=out:st=0.083333", middle_filter)
 
 
 if __name__ == "__main__":

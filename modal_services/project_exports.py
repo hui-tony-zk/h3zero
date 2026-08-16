@@ -20,6 +20,8 @@ EXPORT_RETENTION_SECONDS = 24 * 60 * 60
 MAX_PROJECT_CLIPS = 24
 MAX_PROJECT_EXPORT_BYTES = 2 * 1024 * 1024 * 1024
 PLAYBACK_RATES = {0.5, 0.75, 1.0, 1.25, 1.5, 2.0}
+PROJECT_TRANSITION_SECONDS = 0.5
+PROJECT_EXPORT_FPS = 24
 _EXPORT_ID = re.compile(r"^[a-f0-9]{32}$")
 _CLIP_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
@@ -238,11 +240,29 @@ def build_ffmpeg_command(
         rate = clip["playbackRate"]
         total_duration += source_span / rate
         input_args.extend(["-ss", str(clip["inPoint"]), "-t", str(source_span), "-i", str(source)])
-        filters.append(
-            f"[{index}:v]scale={width}:{height}:force_original_aspect_ratio=decrease,"
-            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=24,"
-            f"format=yuv420p,settb=AVTB,setpts=(PTS-STARTPTS)/{rate}[v{index}]"
-        )
+        fade_count = int(index > 0) + int(index < len(clips) - 1)
+        fade_budget = max(0.0, source_span / rate - (1 / PROJECT_EXPORT_FPS))
+        fade_duration = min(
+            PROJECT_TRANSITION_SECONDS,
+            fade_budget / fade_count,
+        ) if fade_count else 0.0
+        video_filters = [
+            f"scale={width}:{height}:force_original_aspect_ratio=decrease",
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black",
+            "setsar=1",
+            f"fps={PROJECT_EXPORT_FPS}",
+            "format=yuv420p",
+            "settb=AVTB",
+            f"setpts=(PTS-STARTPTS)/{rate}",
+        ]
+        if index > 0 and fade_duration > 0:
+            video_filters.append(f"fade=t=in:st=0:d={fade_duration}:color=black")
+        if index < len(clips) - 1 and fade_duration > 0:
+            fade_start = max(0.0, source_span / rate - fade_duration)
+            video_filters.append(
+                f"fade=t=out:st={fade_start}:d={fade_duration}:color=black"
+            )
+        filters.append(f"[{index}:v]" + ",".join(video_filters) + f"[v{index}]")
         video_labels.append(f"[v{index}]")
         if include_audio:
             filters.append(

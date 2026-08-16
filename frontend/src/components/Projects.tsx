@@ -32,7 +32,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { useLocalGeneratedVideoUrl } from "../hooks/useLocalGeneratedVideoUrl";
 import { ApiError, createProjectExport, getProjectExport } from "../lib/api/client";
 import { clearStoredProjectExport, downloadProjectExport, prepareProjectExportVideos, readStoredProjectExport, writeStoredProjectExport } from "../lib/projectExport";
-import { clipDuration, clipFractionAtSourceTime, isProjectPlaybackBoundary, MIN_CLIP_SECONDS, sourceTimeAtClipFraction } from "../lib/projects";
+import { clipDuration, clipFractionAtSourceTime, isProjectPlaybackBoundary, MIN_CLIP_SECONDS, projectClipOpacity, sourceTimeAtClipFraction } from "../lib/projects";
 import type { AspectId, Job, LocalProject, ProjectClip } from "../types";
 import { RemixIcon } from "./icons";
 
@@ -474,11 +474,40 @@ function ProjectPreview({ clips, jobsById, selectedClipId, aspect, seekTarget, o
   onRemoveClip: (clipId: string) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const fadeOverlayRef = useRef<HTMLDivElement | null>(null);
+  const fadeAnimationRef = useRef<number | null>(null);
   const continuePlaybackRef = useRef(false);
   const advancingRef = useRef(false);
   const selectedIndex = Math.max(0, clips.findIndex((clip) => clip.id === selectedClipId));
   const clip = clips[selectedIndex] ?? null;
   const localVideo = useLocalGeneratedVideoUrl(clip?.jobId ?? null, clip ? jobsById.get(clip.jobId)?.contentUrl : null);
+
+  const updatePreviewFade = useCallback((video: HTMLVideoElement) => {
+    if (!clip || !fadeOverlayRef.current) return;
+    const opacity = projectClipOpacity(clip, selectedIndex, clips.length, video.currentTime);
+    fadeOverlayRef.current.style.opacity = String(1 - opacity);
+  }, [clip, clips.length, selectedIndex]);
+
+  const stopPreviewFade = useCallback(() => {
+    if (fadeAnimationRef.current !== null) cancelAnimationFrame(fadeAnimationRef.current);
+    fadeAnimationRef.current = null;
+  }, []);
+
+  const animatePreviewFade = useCallback(() => {
+    stopPreviewFade();
+    const frame = () => {
+      const video = videoRef.current;
+      if (!video) return;
+      updatePreviewFade(video);
+      if (!video.paused && !video.ended) fadeAnimationRef.current = requestAnimationFrame(frame);
+    };
+    frame();
+  }, [stopPreviewFade, updatePreviewFade]);
+
+  useEffect(() => {
+    stopPreviewFade();
+    return stopPreviewFade;
+  }, [clip?.id, stopPreviewFade]);
 
   const advancePreview = useCallback((shouldContinue: boolean) => {
     const next = clips[selectedIndex + 1];
@@ -511,7 +540,7 @@ function ProjectPreview({ clips, jobsById, selectedClipId, aspect, seekTarget, o
 
   return (
     <section className="flex min-h-0 items-center justify-center overflow-hidden bg-[radial-gradient(circle_at_50%_20%,rgba(66,172,255,.08),transparent_45%)] p-5 sm:p-8">
-      {clip && localVideo.url ? <div className="flex max-h-full max-w-full items-center justify-center" style={{ aspectRatio: aspect.replace(":", "/") }}>
+      {clip && localVideo.url ? <div className="relative flex max-h-full max-w-full items-center justify-center overflow-hidden rounded-xl bg-black" style={{ aspectRatio: aspect.replace(":", "/") }}>
         <video
           key={`${clip.id}:${localVideo.url}`}
           ref={videoRef}
@@ -526,6 +555,7 @@ function ProjectPreview({ clips, jobsById, selectedClipId, aspect, seekTarget, o
             video.currentTime = Math.min(Math.max(clip.inPoint, requestedTime), Math.max(0, video.duration - 0.05));
             video.playbackRate = clip.playbackRate;
             onPosition(clip.id, video.currentTime);
+            updatePreviewFade(video);
             if (Number.isFinite(video.duration) && Math.abs(video.duration - clip.sourceDuration) > 0.1) {
               const usedFullSource = Math.abs(clip.outPoint - clip.sourceDuration) < 0.1;
               onUpdateClip(clip.id, { sourceDuration: video.duration, outPoint: usedFullSource ? video.duration : Math.min(clip.outPoint, video.duration) });
@@ -535,19 +565,24 @@ function ProjectPreview({ clips, jobsById, selectedClipId, aspect, seekTarget, o
               void video.play().catch(() => { continuePlaybackRef.current = false; });
             }
           }}
-          onPlay={() => { continuePlaybackRef.current = true; }}
+          onPlay={() => { continuePlaybackRef.current = true; animatePreviewFade(); }}
           onPause={(event) => {
+            stopPreviewFade();
+            updatePreviewFade(event.currentTarget);
             if (!advancingRef.current && !isProjectPlaybackBoundary(clip, event.currentTarget.currentTime, event.currentTarget.ended)) {
               continuePlaybackRef.current = false;
             }
           }}
           onTimeUpdate={(event) => {
+            updatePreviewFade(event.currentTarget);
             onPosition(clip.id, event.currentTarget.currentTime);
             if (advancingRef.current || !isProjectPlaybackBoundary(clip, event.currentTarget.currentTime, event.currentTarget.ended)) return;
             advancePreview(continuePlaybackRef.current);
           }}
+          onSeeked={(event) => updatePreviewFade(event.currentTarget)}
           onEnded={() => { if (!advancingRef.current) advancePreview(continuePlaybackRef.current); }}
         />
+        <div ref={fadeOverlayRef} className="pointer-events-none absolute inset-0 bg-black opacity-0" aria-hidden="true" />
       </div> : <div className="text-center">{localVideo.loading ? <LoaderCircle size={24} className="mx-auto animate-spin text-white/20" /> : <Film size={24} className="mx-auto text-white/18" />}<p className="mt-3 text-xs text-white/35">{localVideo.loading ? "Loading video from this device…" : clip ? "Video unavailable on this device." : "Add a video to begin your sequence."}</p>{clip && !localVideo.loading && <button type="button" onClick={() => onRemoveClip(clip.id)} className="mt-4 rounded-full border border-white/10 px-3 py-1.5 text-[10px] font-semibold text-white/55 hover:border-red-400/25 hover:bg-red-500/10 hover:text-red-300">Remove clip</button>}</div>}
     </section>
   );

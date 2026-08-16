@@ -8,6 +8,8 @@ export interface ProjectMembership {
 export const MIN_CLIP_SECONDS = 0.25;
 export const PROJECT_SCHEMA_VERSION = 1 as const;
 export const PROJECT_PLAYBACK_END_EPSILON = 0.03;
+export const PROJECT_TRANSITION_SECONDS = 0.5;
+export const PROJECT_PREVIEW_FPS = 30;
 
 function finiteNumber(value: unknown, fallback: number) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
@@ -33,6 +35,34 @@ export function sourceTimeAtClipFraction(clip: ProjectClip, fraction: number) {
 
 export function isProjectPlaybackBoundary(clip: ProjectClip, sourceTime: number, ended = false) {
   return ended || sourceTime >= clip.outPoint - PROJECT_PLAYBACK_END_EPSILON;
+}
+
+export function projectClipFadeDuration(
+  clip: ProjectClip,
+  index: number,
+  clipCount: number,
+  fps = PROJECT_PREVIEW_FPS,
+) {
+  const fadeCount = Number(index > 0) + Number(index < clipCount - 1);
+  if (!fadeCount) return 0;
+  const fadeBudget = Math.max(0, clipDuration(clip) - 1 / Math.max(1, fps));
+  return Math.min(PROJECT_TRANSITION_SECONDS, fadeBudget / fadeCount);
+}
+
+export function projectClipOpacity(
+  clip: ProjectClip,
+  index: number,
+  clipCount: number,
+  sourceTime: number,
+  fps = PROJECT_PREVIEW_FPS,
+) {
+  const fadeDuration = projectClipFadeDuration(clip, index, clipCount, fps);
+  if (!fadeDuration) return 1;
+  const duration = clipDuration(clip);
+  const elapsed = Math.max(0, Math.min(duration, (sourceTime - clip.inPoint) / clip.playbackRate));
+  const fadeIn = index > 0 ? elapsed / fadeDuration : 1;
+  const fadeOut = index < clipCount - 1 ? (duration - elapsed) / fadeDuration : 1;
+  return Math.max(0, Math.min(1, fadeIn, fadeOut));
 }
 
 export function normalizeClip(clip: ProjectClip): ProjectClip {

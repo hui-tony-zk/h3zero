@@ -11,6 +11,7 @@ export const PROJECT_PLAYBACK_END_EPSILON = 0.03;
 export const PROJECT_TRANSITION_SECONDS = 0.3;
 export const PROJECT_PREVIEW_FPS = 30;
 const PROJECT_PLAYBACK_SHORTCUT_EXCLUSIONS = "input, textarea, select, button, a[href], video, [contenteditable]:not([contenteditable='false']), [role='slider']";
+const PROJECT_TIMELINE_SELECTOR = "[data-project-timeline]";
 
 function finiteNumber(value: unknown, fallback: number) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
@@ -54,6 +55,7 @@ export function shouldToggleProjectPlayback(event: Pick<KeyboardEvent,
   if ((event.code !== "Space" && event.key !== " ") || event.repeat || event.defaultPrevented) return false;
   if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return false;
   const target = event.target as { closest?: (selectors: string) => Element | null } | null;
+  if (target?.closest?.(PROJECT_TIMELINE_SELECTOR)) return true;
   return !target?.closest?.(PROJECT_PLAYBACK_SHORTCUT_EXCLUSIONS);
 }
 

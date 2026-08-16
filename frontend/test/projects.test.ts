@@ -71,7 +71,12 @@ test("space toggles project playback without stealing interactive controls", () 
   assert.equal(shouldToggleProjectPlayback(event({ repeat: true })), false);
   assert.equal(shouldToggleProjectPlayback(event({ metaKey: true })), false);
   assert.equal(shouldToggleProjectPlayback(event({ code: "Enter", key: "Enter" })), false);
-  assert.equal(shouldToggleProjectPlayback(event({ target: { closest: () => ({ tagName: "INPUT" }) } })), false);
+  assert.equal(shouldToggleProjectPlayback(event({
+    target: { closest: (selector: string) => selector.includes("input") ? ({ tagName: "INPUT" }) : null },
+  })), false);
+  assert.equal(shouldToggleProjectPlayback(event({
+    target: { closest: (selector: string) => selector === "[data-project-timeline]" ? ({ dataset: { projectTimeline: "" } }) : ({ tagName: "BUTTON" }) },
+  })), true);
 });
 
 test("project clips fade through black for 0.3 seconds between clips", () => {

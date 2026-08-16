@@ -306,6 +306,7 @@ function TimelineStrip({ clips, jobsById, selectedClipId, playhead, onSelect, on
   const itemIds = clips.map((clip) => clip.id);
   const activeClip = activeClipId ? clips.find((clip) => clip.id === activeClipId) ?? null : null;
   const clipNodesRef = useRef<Map<string, HTMLButtonElement>>(new Map());
+  const timelineRef = useRef<HTMLDivElement | null>(null);
   const playheadClip = clips.find((clip) => clip.id === playhead?.clipId) ?? clips.find((clip) => clip.id === selectedClipId) ?? clips[0];
   const playheadIndex = clips.findIndex((clip) => clip.id === playheadClip?.id);
   const playheadFraction = playheadClip ? clipFractionAtSourceTime(playheadClip, playhead?.clipId === playheadClip.id ? playhead.sourceTime : playheadClip.inPoint) : 0;
@@ -369,12 +370,27 @@ function TimelineStrip({ clips, jobsById, selectedClipId, playhead, onSelect, on
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} autoScroll={false} onDragStart={handleDragStart} onDragCancel={() => setActiveClipId(null)} onDragEnd={handleDragEnd}>
       <SortableContext items={itemIds} strategy={horizontalListSortingStrategy}>
-        <div className="overflow-x-auto px-4 pb-4 pt-2 sm:px-5" aria-label="Project timeline">
-          <div className="relative flex w-max">
-            {clips.map((clip, index) => <Fragment key={clip.id}>
-              <SortableTimelineClip clip={clip} sourceUrl={jobsById.get(clip.jobId)?.contentUrl} position={index + 1} selected={clip.id === selectedClipId} active={clip.id === activeClipId} setClipNode={setClipNode} onSelect={() => onSelect(clip.id)} />
-              {index < clips.length - 1 && <TransitionToggle incomingClip={clips[index + 1]} position={index + 2} onSetTransition={onSetTransition} />}
-            </Fragment>)}
+        <div ref={timelineRef} data-project-timeline role="region" tabIndex={0} className="overflow-x-auto px-4 pb-4 pt-1 outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-reelo-accent/45 sm:px-5" aria-label="Project timeline">
+          <div className="relative w-max pt-7">
+            <div
+              aria-hidden="true"
+              title="Click or drag to seek"
+              className="absolute inset-x-0 top-0 z-10 h-7 cursor-pointer touch-none border-b border-white/8 bg-[repeating-linear-gradient(90deg,rgba(255,255,255,.13)_0_1px,transparent_1px_36px)] bg-[length:auto_5px] bg-bottom bg-no-repeat outline-none hover:border-white/16 focus-visible:border-reelo-accent/60"
+              onPointerDown={(event) => {
+                timelineRef.current?.focus({ preventScroll: true });
+                event.currentTarget.setPointerCapture(event.pointerId);
+                seekAtClientX(event.clientX);
+              }}
+              onPointerMove={(event) => {
+                if (event.currentTarget.hasPointerCapture(event.pointerId)) seekAtClientX(event.clientX);
+              }}
+            />
+            <div className="relative flex">
+              {clips.map((clip, index) => <Fragment key={clip.id}>
+                <SortableTimelineClip clip={clip} sourceUrl={jobsById.get(clip.jobId)?.contentUrl} position={index + 1} selected={clip.id === selectedClipId} active={clip.id === activeClipId} setClipNode={setClipNode} onSelect={() => onSelect(clip.id)} />
+                {index < clips.length - 1 && <TransitionToggle incomingClip={clips[index + 1]} position={index + 2} onSetTransition={onSetTransition} />}
+              </Fragment>)}
+            </div>
             {playheadClip && <button
               type="button"
               role="slider"
@@ -384,7 +400,7 @@ function TimelineStrip({ clips, jobsById, selectedClipId, playhead, onSelect, on
               aria-valuenow={playhead?.sourceTime ?? playheadClip.inPoint}
               aria-valuetext={`Clip ${playheadIndex + 1}, ${formatSeconds(playhead?.sourceTime ?? playheadClip.inPoint)}`}
               title="Drag to seek"
-              className="absolute -top-2 z-30 h-[6.5rem] w-5 -translate-x-1/2 touch-none cursor-ew-resize outline-none focus-visible:ring-2 focus-visible:ring-reelo-accent/70"
+              className="absolute top-1 z-30 h-[7.5rem] w-5 -translate-x-1/2 touch-none cursor-ew-resize outline-none focus-visible:ring-2 focus-visible:ring-reelo-accent/70"
               style={playheadStyle}
               onClick={(event) => event.stopPropagation()}
               onKeyDown={(event) => {
@@ -549,6 +565,9 @@ function ProjectPreview({ clips, jobsById, selectedClipId, aspect, seekTarget, o
       const video = videoRef.current;
       if (!video || !shouldToggleProjectPlayback(event)) return;
       event.preventDefault();
+      if (event.target instanceof Element && event.target.closest("[data-project-timeline]")) {
+        event.stopPropagation();
+      }
       if (!video.paused) {
         video.pause();
         return;
@@ -559,8 +578,8 @@ function ProjectPreview({ clips, jobsById, selectedClipId, aspect, seekTarget, o
       }
       void video.play();
     };
-    window.addEventListener("keydown", handlePlaybackShortcut);
-    return () => window.removeEventListener("keydown", handlePlaybackShortcut);
+    window.addEventListener("keydown", handlePlaybackShortcut, true);
+    return () => window.removeEventListener("keydown", handlePlaybackShortcut, true);
   }, [clip, onPosition]);
 
   const advancePreview = useCallback((shouldContinue: boolean) => {

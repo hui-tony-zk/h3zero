@@ -118,6 +118,29 @@ class ModalServiceDefinitionTests(unittest.TestCase):
         self.assertEqual(keywords["max_containers"].value, 2)
         self.assertEqual(keywords["scaledown_window"].value, 15)
 
+    def test_project_export_is_a_separate_cpu_only_function(self):
+        source = Path("modal_services/h3.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        export = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "render_project_export"
+        )
+        function_decorator = next(
+            decorator
+            for decorator in export.decorator_list
+            if isinstance(decorator, ast.Call)
+            and isinstance(decorator.func, ast.Attribute)
+            and decorator.func.attr == "function"
+        )
+        keywords = {keyword.arg: keyword.value for keyword in function_decorator.keywords}
+
+        self.assertNotIn("gpu", keywords)
+        self.assertEqual(keywords["cpu"].value, 4.0)
+        self.assertEqual(keywords["memory"].value, 4096)
+        self.assertIn('H3_CONTAINER_ROLE": "project-export"', source)
+
 
 if __name__ == "__main__":
     unittest.main()

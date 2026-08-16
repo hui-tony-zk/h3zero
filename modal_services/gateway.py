@@ -42,7 +42,7 @@ from minimax_h3.specs import (
 )
 from minimax_h3.loras import resolve_lora_strengths
 from minimax_h3.workflow import validate_generation, validate_image_bytes
-from modal_services import favorites, jobs
+from modal_services import favorites, jobs, project_exports
 
 DEFAULT_CONFIG = {
     "mode": "frames",
@@ -484,6 +484,7 @@ def create_gateway(
     service_factory: Callable,
     function_call_from_id: Callable,
     progress_store=None,
+    project_export_function=None,
     output_root: str | Path = jobs.OUTPUT_ROOT,
     frontend_dist: str | Path = "/frontend/dist",
     probe_media: Callable = media.probe_media,
@@ -626,6 +627,64 @@ def create_gateway(
             )
         return terminal(job_id, "failed", "generation returned without a persisted result")
 
+    def refresh_project_export(export_id: str) -> dict | None:
+        reload()
+        record = project_exports.read_export(export_id, root=root)
+        if record is None:
+            return None
+        if record["status"] == "completed":
+            if not project_exports.video_path(export_id, root).is_file():
+                record = project_exports.update_export(
+                    export_id,
+                    root=root,
+                    status="failed",
+                    error="Exported video is no longer available",
+                )
+                commit()
+            return record
+        if record["status"] not in {"queued", "running"}:
+            return record
+        call_id = record.get("call_id")
+        if not call_id:
+            return record
+        try:
+            result = function_call_from_id(call_id).get(timeout=0)
+        except Exception as exc:
+            name = type(exc).__name__
+            if isinstance(exc, TimeoutError) or name == "TimeoutError":
+                return record
+            if name in {"OutputExpiredError", "NotFoundError"} and time.time() - float(
+                record.get("created_at_unix", 0)
+            ) < 60:
+                return record
+            message = f"Export failed: {str(exc)[:2000]}"
+            record = project_exports.update_export(
+                export_id,
+                root=root,
+                status="failed",
+                error=message,
+            )
+            commit()
+            return record
+        reload()
+        latest = project_exports.read_export(export_id, root=root)
+        if latest and latest["status"] not in {"queued", "running"}:
+            return latest
+        if (
+            isinstance(result, dict)
+            and result.get("status") == "completed"
+            and project_exports.video_path(export_id, root).is_file()
+        ):
+            latest = project_exports.update_export(
+                export_id,
+                root=root,
+                status="completed",
+                error=None,
+            )
+            commit()
+            return latest
+        return record
+
     @api.get("/api/health")
     def health():
         return {
@@ -638,6 +697,105 @@ def create_gateway(
     @api.get("/api/specs")
     def specs():
         return get_specs()
+
+    @api.post("/api/project-exports", status_code=202)
+    async def create_project_export(request: Request):
+        if project_export_function is None:
+            raise HTTPException(status_code=503, detail="project export is unavailable")
+        form = await request.form(
+            max_files=project_exports.MAX_PROJECT_CLIPS,
+            max_fields=4,
+            max_part_size=MAX_VIDEO_BYTES,
+        )
+        export_id = uuid.uuid4().hex
+        try:
+            project_value = form.get("project")
+            if not isinstance(project_value, str):
+                raise ValueError("project JSON is required")
+            project = project_exports.normalize_project(json.loads(project_value))
+            job_ids = list(dict.fromkeys(clip["jobId"] for clip in project["clips"]))
+            allowed_fields = {"project", *(f"video_{job_id}" for job_id in job_ids)}
+            unknown_fields = sorted({name for name, _ in form.multi_items()} - allowed_fields)
+            if unknown_fields:
+                raise ValueError(f"unknown multipart fields: {unknown_fields}")
+            total_bytes = 0
+            for job_id in job_ids:
+                upload = form.get(f"video_{job_id}")
+                if upload is None or not getattr(upload, "filename", ""):
+                    raise ValueError(f"project video is missing for {job_id}")
+                if _content_type(upload) != "video/mp4":
+                    raise ValueError("project videos must be MP4 files")
+                destination = project_exports.input_path(export_id, job_id, root)
+                temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
+                total_bytes += await _stage_upload(upload, temporary, MAX_VIDEO_BYTES)
+                if total_bytes > project_exports.MAX_PROJECT_EXPORT_BYTES:
+                    raise ValueError("project export uploads may not exceed 2 GiB")
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                temporary.replace(destination)
+            project_exports.create_export(export_id, project, root=root)
+            queued = await put_progress_async(export_id, "queued", "Starting export", percent=0)
+            project_exports.update_export(export_id, root=root, progress=queued)
+            await call_modal_async(output_volume.commit)
+            try:
+                call = await call_modal_async(project_export_function.spawn, export_id)
+            except Exception as exc:
+                project_exports.delete_export(export_id, root)
+                delete_progress(export_id)
+                await call_modal_async(output_volume.commit)
+                raise HTTPException(status_code=503, detail="could not start project export") from exc
+            # The worker can update this record immediately after spawn. Reload before
+            # adding its call ID so a fast worker's running/completed state is preserved.
+            await call_modal_async(output_volume.reload)
+            record = project_exports.update_export(
+                export_id,
+                root=root,
+                call_id=call.object_id,
+            )
+            await call_modal_async(output_volume.commit)
+            return JSONResponse(
+                project_exports.public_export(record, queued),
+                status_code=202,
+            )
+        except json.JSONDecodeError as exc:
+            project_exports.delete_export(export_id, root)
+            raise HTTPException(status_code=422, detail="project must be valid JSON") from exc
+        except ValueError as exc:
+            project_exports.delete_export(export_id, root)
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        finally:
+            await _close_form_uploads(form)
+
+    @api.get("/api/project-exports/{export_id}")
+    def get_project_export(export_id: str):
+        try:
+            project_exports.validate_export_id(export_id)
+            record = refresh_project_export(export_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="project export not found") from exc
+        if record is None:
+            raise HTTPException(status_code=404, detail="project export not found")
+        return project_exports.public_export(record, get_progress(export_id))
+
+    @api.get("/api/project-exports/{export_id}/video")
+    def get_project_export_video(export_id: str):
+        try:
+            project_exports.validate_export_id(export_id)
+            record = refresh_project_export(export_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="project export not found") from exc
+        if record is None:
+            raise HTTPException(status_code=404, detail="project export not found")
+        if record["status"] != "completed":
+            raise HTTPException(status_code=409, detail="project export is not ready")
+        path = project_exports.video_path(export_id, root)
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="project export video not found")
+        return FileResponse(
+            path,
+            media_type="video/mp4",
+            filename=f"{project_exports.safe_download_name(record['project']['name'])}.mp4",
+            headers={"Accept-Ranges": "bytes", "Cache-Control": "private, max-age=3600"},
+        )
 
     @api.get("/api/cloud-sync/{username}/favorites")
     def get_favorites(username: str):

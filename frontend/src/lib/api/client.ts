@@ -1,4 +1,4 @@
-import type { ComposerDraft, FavoriteAsset, H3Specs, Job, MediaAsset } from "../../types";
+import type { ComposerDraft, FavoriteAsset, H3Specs, Job, LocalProject, MediaAsset } from "../../types";
 import { parseFavoriteSnapshot } from "../favorites";
 import { parseJobCreate, parseJobStatus, parseSpecs } from "./contracts";
 import { buildCreateJobRequest } from "./createJobRequest";
@@ -87,4 +87,54 @@ export async function getFavoriteAsset(username: string, id: string) {
 
 export function contentUrl(id: string) {
   return `${API_BASE}/jobs/${encodeURIComponent(id)}/video`;
+}
+
+export type ProjectExportStatus = {
+  id: string;
+  status: "queued" | "running" | "completed" | "failed";
+  progress: { phase: string; message: string; percent?: number } | null;
+  error: string | null;
+  downloadUrl: string | null;
+  filename: string | null;
+};
+
+function parseProjectExport(value: unknown): ProjectExportStatus {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("The project export response was invalid.");
+  const source = value as Record<string, unknown>;
+  const status = source.status;
+  if (typeof source.id !== "string" || !["queued", "running", "completed", "failed"].includes(String(status))) {
+    throw new Error("The project export response was invalid.");
+  }
+  const rawProgress = source.progress && typeof source.progress === "object" && !Array.isArray(source.progress)
+    ? source.progress as Record<string, unknown>
+    : null;
+  return {
+    id: source.id,
+    status: status as ProjectExportStatus["status"],
+    progress: rawProgress && typeof rawProgress.phase === "string" && typeof rawProgress.message === "string" ? {
+      phase: rawProgress.phase,
+      message: rawProgress.message,
+      percent: typeof rawProgress.percent === "number" ? rawProgress.percent : undefined,
+    } : null,
+    error: typeof source.error === "string" ? source.error : null,
+    downloadUrl: typeof source.download_url === "string" ? source.download_url : null,
+    filename: typeof source.filename === "string" ? source.filename : null,
+  };
+}
+
+export async function createProjectExport(project: LocalProject, videos: Map<string, Blob>) {
+  const form = new FormData();
+  form.set("project", JSON.stringify({ name: project.name, aspect: project.aspect, clips: project.clips }));
+  videos.forEach((video, jobId) => form.set(`video_${jobId}`, video, `${jobId}.mp4`));
+  return parseProjectExport(await (await request("/project-exports", {
+    method: "POST",
+    headers: { Accept: "application/json" },
+    body: form,
+  })).json());
+}
+
+export async function getProjectExport(id: string) {
+  return parseProjectExport(await (await request(`/project-exports/${encodeURIComponent(id)}`, {
+    headers: { Accept: "application/json" },
+  })).json());
 }

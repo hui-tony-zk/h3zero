@@ -4,7 +4,8 @@ import { parseJobStatus, parseSpecs } from "../src/lib/api/contracts";
 import { buildCreateJobRequest } from "../src/lib/api/createJobRequest";
 import { emptyPromptDocument, restoreReferenceTokens } from "../src/lib/promptDocument";
 import { asset, specs } from "./fixtures";
-import { deleteJob } from "../src/lib/api/client";
+import { createProjectExport, deleteJob } from "../src/lib/api/client";
+import type { LocalProject } from "../src/types";
 
 test("frames request derives geometry from the first uploaded frame", () => {
   const frame = asset("first", "image", 2);
@@ -95,6 +96,43 @@ test("deleting an already-missing job succeeds", async () => {
   });
   try {
     await assert.doesNotReject(deleteJob("already-gone"));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("project export submits local MP4s and parses durable status", async () => {
+  const jobId = "a".repeat(32);
+  const project: LocalProject = {
+    schemaVersion: 1,
+    id: "project-one",
+    name: "Opening cut",
+    createdAt: 1,
+    updatedAt: 1,
+    aspect: "16:9",
+    clips: [{ id: "clip-one", jobId, inPoint: 1, outPoint: 4, sourceDuration: 5, playbackRate: 1.25, order: 0, createdAt: 1 }],
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    assert.equal(input, "/api/project-exports");
+    assert.equal(init?.method, "POST");
+    const body = init?.body as FormData;
+    assert.equal(JSON.parse(String(body.get("project"))).clips[0].jobId, jobId);
+    const video = body.get(`video_${jobId}`) as File;
+    assert.deepEqual({ name: video.name, type: video.type, size: video.size }, { name: `${jobId}.mp4`, type: "video/mp4", size: 3 });
+    return new Response(JSON.stringify({
+      id: "e".repeat(32),
+      status: "queued",
+      progress: { phase: "queued", message: "Starting export", percent: 0 },
+      error: null,
+      download_url: null,
+      filename: null,
+    }), { status: 202, headers: { "Content-Type": "application/json" } });
+  };
+  try {
+    const status = await createProjectExport(project, new Map([[jobId, new Blob(["mp4"], { type: "video/mp4" })]]));
+    assert.equal(status.id, "e".repeat(32));
+    assert.equal(status.progress?.message, "Starting export");
   } finally {
     globalThis.fetch = originalFetch;
   }

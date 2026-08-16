@@ -6,7 +6,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from modal_services import favorites, jobs
+from modal_services import favorites, jobs, project_exports
 from modal_services.gateway import create_gateway, parse_config
 
 
@@ -88,6 +88,17 @@ class FakeService:
         self.generate = FakeGenerate(call)
 
 
+class FakeProjectExportFunction:
+    def __init__(self, call):
+        self.call = call
+        self.submissions = []
+        self.spawn = FakeModalMethod(self._spawn)
+
+    def _spawn(self, export_id):
+        self.submissions.append(export_id)
+        return self.call
+
+
 class GatewayTests(unittest.TestCase):
     @staticmethod
     def png(width=512, height=512):
@@ -109,8 +120,13 @@ class GatewayTests(unittest.TestCase):
         self.volume = FakeVolume()
         self.progress = FakeProgressStore()
         self.call = FakeCall()
+        self.export_call = FakeCall("fc-export")
         self.service = FakeService(self.call)
-        self.calls = {self.call.object_id: self.call}
+        self.export_function = FakeProjectExportFunction(self.export_call)
+        self.calls = {
+            self.call.object_id: self.call,
+            self.export_call.object_id: self.export_call,
+        }
 
         def fake_probe(path):
             path = Path(path)
@@ -148,10 +164,50 @@ class GatewayTests(unittest.TestCase):
             output_root=self.output_root,
             frontend_dist=self.dist,
             progress_store=self.progress,
+            project_export_function=self.export_function,
             probe_media=fake_probe,
             normalize_video=fake_normalize,
         )
         self.client = TestClient(app)
+
+    def test_local_project_export_uploads_polls_and_downloads(self):
+        job_id = "e" * 32
+        project = {
+            "name": "Opening cut",
+            "aspect": "16:9",
+            "clips": [{
+                "id": "clip-one",
+                "jobId": job_id,
+                "inPoint": 1,
+                "outPoint": 4,
+                "sourceDuration": 5,
+                "playbackRate": 1.25,
+            }],
+        }
+        created = self.client.post(
+            "/api/project-exports",
+            data={"project": json.dumps(project)},
+            files={f"video_{job_id}": (f"{job_id}.mp4", b"project-video", "video/mp4")},
+        )
+        self.assertEqual(created.status_code, 202, created.text)
+        export_id = created.json()["id"]
+        self.assertEqual(self.export_function.submissions, [export_id])
+        self.assertEqual(
+            project_exports.input_path(export_id, job_id, self.output_root).read_bytes(),
+            b"project-video",
+        )
+
+        pending = self.client.get(f"/api/project-exports/{export_id}")
+        self.assertEqual(pending.status_code, 200)
+        self.assertEqual(pending.json()["status"], "queued")
+
+        project_exports.video_path(export_id, self.output_root).write_bytes(b"exported-mp4")
+        project_exports.update_export(export_id, root=self.output_root, status="completed")
+        completed = self.client.get(f"/api/project-exports/{export_id}")
+        self.assertEqual(completed.json()["download_url"], f"/api/project-exports/{export_id}/video")
+        video = self.client.get(f"/api/project-exports/{export_id}/video")
+        self.assertEqual(video.status_code, 200)
+        self.assertEqual(video.content, b"exported-mp4")
 
     def tearDown(self):
         self.temporary.cleanup()

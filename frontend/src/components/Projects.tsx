@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Film, GripVertical, LoaderCircle, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, Film, GripVertical, LoaderCircle, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   forwardRef,
@@ -30,6 +30,8 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useLocalGeneratedVideoUrl } from "../hooks/useLocalGeneratedVideoUrl";
+import { ApiError, createProjectExport, getProjectExport } from "../lib/api/client";
+import { clearStoredProjectExport, downloadProjectExport, prepareProjectExportVideos, readStoredProjectExport, writeStoredProjectExport } from "../lib/projectExport";
 import { clipDuration, clipFractionAtSourceTime, isProjectPlaybackBoundary, MIN_CLIP_SECONDS, sourceTimeAtClipFraction } from "../lib/projects";
 import type { AspectId, Job, LocalProject, ProjectClip } from "../types";
 import { RemixIcon } from "./icons";
@@ -37,6 +39,7 @@ import { RemixIcon } from "./icons";
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
 const TIMELINE_DRAG_HOLD_MS = 250;
 const TIMELINE_SCROLL_CANCEL_X_PX = 6;
+const EXPORT_POLL_INTERVAL_MS = 1500;
 
 type ProjectPlayhead = { clipId: string; sourceTime: number };
 type ProjectSeekTarget = ProjectPlayhead & { requestId: number };
@@ -45,6 +48,10 @@ function formatSeconds(value: number) {
   const minutes = Math.floor(value / 60);
   const seconds = value - minutes * 60;
   return minutes ? `${minutes}:${seconds.toFixed(1).padStart(4, "0")}` : `${seconds.toFixed(1)}s`;
+}
+
+function wait(milliseconds: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
 export function Projects({ projects, jobs, selectedProjectId, onSelectProject, onCreateProject, onRenameProject, onSetAspect, onDeleteProject, onUpdateClip, onRemoveClip, onReorderClips, onMoveClip, onOpenLibrary, onRemix }: {
@@ -139,7 +146,11 @@ function ProjectEditor({ project, jobs, onRename, onSetAspect, onDelete, onUpdat
   const [playhead, setPlayhead] = useState<ProjectPlayhead | null>(() => orderedClips[0] ? { clipId: orderedClips[0].id, sourceTime: orderedClips[0].inPoint } : null);
   const [seekTarget, setSeekTarget] = useState<ProjectSeekTarget | null>(null);
   const seekRequestIdRef = useRef(0);
+  const activeExportRef = useRef<string | null>(null);
   const [name, setName] = useState(project.name);
+  const [exporting, setExporting] = useState(false);
+  const [exportMessage, setExportMessage] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
   const selectedClip = orderedClips.find((clip) => clip.id === selectedClipId) ?? orderedClips[0] ?? null;
   const selectedIndex = selectedClip ? orderedClips.findIndex((clip) => clip.id === selectedClip.id) : -1;
   const jobsById = useMemo(() => new Map(jobs.map((job) => [job.id, job])), [jobs]);
@@ -174,14 +185,89 @@ function ProjectEditor({ project, jobs, onRename, onSetAspect, onDelete, onUpdat
     setPlayhead({ clipId, sourceTime });
   }, []);
 
+  const pollExportToCompletion = useCallback(async (exportId: string, filename: string) => {
+    activeExportRef.current = exportId;
+    setExporting(true);
+    setExportError(null);
+    let retryDelay = EXPORT_POLL_INTERVAL_MS;
+    try {
+      while (activeExportRef.current === exportId) {
+        let status;
+        try {
+          status = await getProjectExport(exportId);
+          retryDelay = EXPORT_POLL_INTERVAL_MS;
+        } catch (error) {
+          if (error instanceof ApiError && error.status < 500) throw error;
+          setExportMessage("Reconnecting to export…");
+          await wait(retryDelay);
+          retryDelay = Math.min(10_000, retryDelay * 1.5);
+          continue;
+        }
+        if (activeExportRef.current !== exportId) return;
+        if (status.progress?.message) setExportMessage(status.progress.message);
+        if (status.status === "failed") throw new Error(status.error || "Project export failed.");
+        if (status.status === "completed" && status.downloadUrl) {
+          downloadProjectExport(status.downloadUrl, status.filename || filename);
+          setExportMessage("Download started");
+          clearStoredProjectExport(project.id);
+          return;
+        }
+        await wait(EXPORT_POLL_INTERVAL_MS);
+      }
+    } catch (error) {
+      if (activeExportRef.current !== exportId) return;
+      clearStoredProjectExport(project.id);
+      setExportError(error instanceof Error ? error.message : "Project export failed.");
+      setExportMessage(null);
+    } finally {
+      if (activeExportRef.current === exportId) {
+        activeExportRef.current = null;
+        setExporting(false);
+      }
+    }
+  }, [project.id]);
+
+  useEffect(() => {
+    const stored = readStoredProjectExport(project.id);
+    if (stored) {
+      setExportMessage("Resuming export…");
+      void pollExportToCompletion(stored.exportId, stored.filename);
+    }
+    return () => { activeExportRef.current = null; };
+  }, [pollExportToCompletion, project.id]);
+
+  const exportProject = useCallback(async () => {
+    if (!orderedClips.length || exporting) return;
+    setExporting(true);
+    setExportError(null);
+    setExportMessage("Preparing clips…");
+    clearStoredProjectExport(project.id);
+    try {
+      const videos = await prepareProjectExportVideos(project, jobsById, (completed, total) => {
+        setExportMessage(`Preparing clips ${completed}/${total}`);
+      });
+      setExportMessage("Uploading clips…");
+      const status = await createProjectExport(project, videos);
+      const filename = `${project.name || "Untitled project"}.mp4`;
+      writeStoredProjectExport(project.id, { exportId: status.id, filename, updatedAt: Date.now() });
+      await pollExportToCompletion(status.id, filename);
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : "Project export failed.");
+      setExportMessage(null);
+      setExporting(false);
+    }
+  }, [exporting, jobsById, orderedClips.length, pollExportToCompletion, project]);
+
   return (
     <div className="flex min-h-[calc(100dvh-5.25rem)] flex-col">
       <header className="flex flex-wrap items-center gap-3 border-b border-white/7 px-4 py-3 sm:px-5">
         <input value={name} onChange={(event) => setName(event.target.value)} onBlur={() => onRename(name)} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-white outline-none placeholder:text-white/25 sm:text-base" aria-label="Project name" />
         <span className="text-[10px] tabular-nums text-white/35">{orderedClips.length} clips · {formatSeconds(totalDuration)}</span>
         <div className="flex rounded-full bg-white/[.035] p-0.5">{(["16:9", "9:16"] as AspectId[]).map((aspect) => <button key={aspect} type="button" onClick={() => onSetAspect(aspect)} className={`rounded-full px-2.5 py-1 text-[9px] font-bold ${project.aspect === aspect ? "bg-white/10 text-white" : "text-white/35 hover:text-white/70"}`}>{aspect}</button>)}</div>
+        <button type="button" disabled={exporting || !orderedClips.length} onClick={() => void exportProject()} className="flex h-8 items-center gap-1.5 rounded-full border border-white/9 bg-white/[.035] px-3 text-[9px] font-bold text-white/62 hover:border-white/16 hover:bg-white/7 hover:text-white disabled:cursor-not-allowed disabled:opacity-30" title={exporting ? "Exporting project" : "Export MP4"}>{exporting ? <LoaderCircle size={12} className="animate-spin" /> : <Download size={12} />}<span>{exporting ? "Exporting" : "Export"}</span></button>
         <button type="button" onClick={onDelete} className="flex size-8 items-center justify-center rounded-full text-white/35 hover:bg-red-500/15 hover:text-red-300" aria-label="Delete project"><Trash2 size={13} /></button>
       </header>
+      <AnimatePresence initial={false}>{(exportMessage || exportError) && <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className={`overflow-hidden border-b px-5 py-2 text-[10px] ${exportError ? "border-red-400/10 bg-red-500/[.045] text-red-300" : "border-white/7 bg-white/[.018] text-white/42"}`}>{exportError ?? exportMessage}</motion.div>}</AnimatePresence>
 
       <div className="grid min-h-0 flex-1 grid-rows-[minmax(300px,1fr)_auto] lg:grid-cols-[minmax(0,1fr)_260px] lg:grid-rows-[minmax(0,1fr)_auto]">
         <ProjectPreview clips={orderedClips} jobsById={jobsById} selectedClipId={selectedClip?.id ?? null} aspect={project.aspect} seekTarget={seekTarget} onSelectClip={selectPreviewClip} onPosition={updatePreviewPosition} onUpdateClip={onUpdateClip} onRemoveClip={onRemoveClip} />

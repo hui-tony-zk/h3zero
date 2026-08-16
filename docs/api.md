@@ -37,6 +37,9 @@ deployed H3Zero and `npm run generate` do not use it.
 | `GET` | `/api/jobs/{id}/video` | Stream the completed MP4 |
 | `POST` | `/api/jobs/{id}/acknowledge` | Release a completed result after durable browser caching |
 | `DELETE` | `/api/jobs/{id}` | Cancel and delete a job |
+| `POST` | `/api/project-exports` | Upload a local project snapshot and start a CPU MP4 export |
+| `GET` | `/api/project-exports/{id}` | Read project export status and progress |
+| `GET` | `/api/project-exports/{id}/video` | Download a completed project MP4 |
 | `GET` | `/api/cloud-sync/{username}/favorites` | List a sync name's favorites |
 | `PUT` | `/api/cloud-sync/{username}/favorites/{id}` | Save a favorite video, metadata, and remix sources |
 | `GET` | `/api/cloud-sync/{username}/favorites/{id}/video` | Stream a favorite's durable MP4 |
@@ -126,6 +129,20 @@ curl -X POST "$H3_MODAL_URL/api/jobs/$JOB_ID/acknowledge"
 
 Unacknowledged jobs are retained for 24 hours to allow interrupted downloads,
 then removed by scheduled maintenance. Acknowledgement is idempotent.
+
+## Project exports
+
+Projects remain browser-local. Export is the only operation that sends a
+project's cached media to Modal. `POST /api/project-exports` accepts multipart
+`project` JSON plus one MP4 field named `video_{job_id}` for every unique job
+referenced by the project. The snapshot supports 16:9 or 9:16 output, up to 24
+ordered clips, trim points, and playback rates from 0.5× through 2×.
+
+Creation returns `202` and an export ID. Poll the status route until it reports
+`completed` or `failed`, then download `download_url`. Rendering runs on a
+dedicated CPU-only FFmpeg function and preserves source audio when every clip
+contains audio. Uploads and finished exports are transient and are removed by
+scheduled maintenance after 24 hours.
 
 ## Local development
 

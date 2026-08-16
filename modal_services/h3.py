@@ -18,19 +18,20 @@ from minimax_h3.config import (
 )
 from minimax_h3.specs import resolve_sampling_profile
 from minimax_h3.workflow import validate_image_bytes
-from modal_services import jobs
+from modal_services import jobs, project_exports
 
 
 output_volume = modal.Volume.from_name(OUTPUT_VOLUME_NAME, create_if_missing=True)
 progress_store = modal.Dict.from_name(PROGRESS_DICT_NAME, create_if_missing=True)
 
 frontend_dist = Path(__file__).resolve().parent.parent / "frontend" / "dist"
-web_image = (
+base_image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("ffmpeg")
     .pip_install("fastapi==0.141.1", "python-multipart==0.0.32")
-    .env({"H3_CONTAINER_ROLE": "web"})
 )
+web_image = base_image.env({"H3_CONTAINER_ROLE": "web"})
+project_export_image = base_image.env({"H3_CONTAINER_ROLE": "project-export"})
 if (frontend_dist / "index.html").is_file():
     web_image = web_image.add_local_dir(
         frontend_dist,
@@ -38,6 +39,10 @@ if (frontend_dist / "index.html").is_file():
         copy=True,
     )
 web_image = web_image.add_local_python_source("minimax_h3", "modal_services")
+project_export_image = project_export_image.add_local_python_source(
+    "minimax_h3",
+    "modal_services",
+)
 
 app = modal.App(WEB_APP_NAME)
 
@@ -58,10 +63,16 @@ def maintain_outputs():
     output_volume.commit()
 
     cleanup = jobs.cleanup_stale_jobs()
+    removed_exports = project_exports.cleanup_stale_exports()
     live_job_ids = set()
     jobs_directory = Path(jobs.OUTPUT_ROOT) / "jobs"
     if jobs_directory.is_dir():
         live_job_ids = {path.stem for path in jobs_directory.glob("*.json")}
+    exports_directory = Path(jobs.OUTPUT_ROOT) / "project-exports"
+    if exports_directory.is_dir():
+        live_job_ids.update(
+            path.parent.name for path in exports_directory.glob("*/metadata.json")
+        )
     removed_progress = 0
     try:
         for key in list(progress_store.keys()):
@@ -74,10 +85,52 @@ def maintain_outputs():
     result = {
         "migration": migration,
         "cleanup": cleanup,
+        "removed_exports": removed_exports,
         "removed_progress": removed_progress,
     }
     print(f"H3 output maintenance: {result}", flush=True)
     return result
+
+
+@app.function(
+    image=project_export_image,
+    volumes={jobs.OUTPUT_ROOT: output_volume},
+    timeout=45 * 60,
+    cpu=4.0,
+    memory=4096,
+    max_containers=2,
+)
+def render_project_export(export_id: str) -> dict:
+    """Render a transient local project upload without invoking the GPU worker."""
+    output_volume.reload()
+
+    def progress(phase: str, message: str, percent: float) -> None:
+        progress_store.put(export_id, {
+            "phase": phase,
+            "message": message,
+            "percent": percent,
+            "updated_at": jobs.utc_now(),
+        })
+
+    progress("loading", "Preparing project", 0.0)
+    project_exports.update_export(export_id, status="running", error=None)
+    output_volume.commit()
+    try:
+        result = project_exports.render_export(export_id, on_progress=progress)
+    except Exception as exc:
+        message = f"Export failed: {str(exc)[:2000]}"
+        progress_store.put(export_id, {
+            "phase": "failed",
+            "message": message,
+            "updated_at": jobs.utc_now(),
+        })
+        project_exports.update_export(export_id, status="failed", error=message)
+        output_volume.commit()
+        raise
+    progress("done", "Export ready", 1.0)
+    project_exports.update_export(export_id, status="completed", error=None)
+    output_volume.commit()
+    return {"status": "completed", **result}
 
 
 @app.function(
@@ -98,6 +151,7 @@ def web():
         service_factory=Service,
         function_call_from_id=modal.FunctionCall.from_id,
         progress_store=progress_store,
+        project_export_function=render_project_export,
     )
 
 

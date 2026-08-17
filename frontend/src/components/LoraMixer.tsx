@@ -93,7 +93,7 @@ function MixerHeader({ label, onClose, onRemove }: { label: string; onClose: () 
 function LoraSliderRow({ lora, value, onChange, onCommit, compact = false }: { lora: LoraConfig; value: number; onChange: (value: number) => void; onCommit: (value: number) => void; compact?: boolean }) {
   const commit = (input: HTMLInputElement) => onCommit(parseFloat(input.value));
   return <div className={`row slider-row lora-slider-row ${compact ? "compact" : ""}`}>
-    {!compact && <label>{lora.name} LoRA</label>}
+    {!compact && <div className="lora-slider-label">{lora.reference_url ? <a href={lora.reference_url} target="_blank" rel="noopener noreferrer" title={`View ${lora.name} reference`}><span>{lora.name}</span><ExternalLinkIcon /></a> : <span>{lora.name}</span>}</div>}
     <div className="slider-container"><span className="lora-range-edge">{lora.min_strength}</span><input type="range" min={lora.min_strength} max={lora.max_strength} step={lora.step} value={value} aria-label={`${lora.name} strength`} onChange={(event) => onChange(parseFloat(event.target.value))} onPointerUp={(event) => commit(event.currentTarget)} onKeyUp={(event) => commit(event.currentTarget)} onBlur={(event) => commit(event.currentTarget)} /><span className="lora-range-edge">{lora.max_strength}</span><span className="slider-val">{value.toFixed(1)}</span></div>
   </div>;
 }
@@ -104,4 +104,8 @@ function CloseIcon() {
 
 function TrashIcon() {
   return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18" /><path d="M8 6V4h8v2" /><path d="M19 6l-1 14H6L5 6" /><path d="M10 11v5" /><path d="M14 11v5" /></svg>;
+}
+
+function ExternalLinkIcon() {
+  return <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 3h6v6" /><path d="M10 14 21 3" /><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /></svg>;
 }

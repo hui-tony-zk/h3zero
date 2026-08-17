@@ -38,6 +38,27 @@ class LoraConfigTests(unittest.TestCase):
         self.assertEqual(configured[0]["filename"], "pose.safetensors")
         self.assertFalse(configured[0]["default_enabled"])
 
+    def test_named_catalog_can_expose_an_https_reference_page(self):
+        configured = loras.normalize_loras({
+            "Style": {
+                "download_url": "https://huggingface.co/owner/repo/resolve/main/style.safetensors",
+                "reference_url": "https://civarchive.com/models/1?modelVersionId=2",
+            }
+        })
+        with patch("minimax_h3.loras.CONFIGURED_LORAS", configured):
+            self.assertEqual(
+                loras.public_loras()[0]["reference_url"],
+                "https://civarchive.com/models/1?modelVersionId=2",
+            )
+            self.assertNotIn("repo", loras.public_loras()[0])
+        with self.assertRaisesRegex(ValueError, "reference_url must use https"):
+            loras.normalize_loras({
+                "Style": {
+                    "download_url": "https://huggingface.co/owner/repo/resolve/main/style.safetensors",
+                    "reference_url": "http://example.com/style",
+                }
+            })
+
     def test_rejects_unconfigured_and_out_of_range_loras(self):
         configured = loras.normalize_loras([self.entry()])
         with patch("minimax_h3.loras.CONFIGURED_LORAS", configured):

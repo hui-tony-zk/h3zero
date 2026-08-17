@@ -59,9 +59,32 @@ def _entry_from_url(name: str, url: str) -> dict:
     }
 
 
-def normalize_loras(entries: Iterable[Mapping] | Mapping[str, str]) -> tuple[dict, ...]:
+def _entry_from_named_value(name: str, value: str | Mapping) -> dict:
+    if isinstance(value, str):
+        return _entry_from_url(name, value)
+    if not isinstance(value, Mapping):
+        raise ValueError(f"LoRA {name} must be a download URL or mapping")
+    entry = _entry_from_url(name, value.get("download_url"))
+    entry["reference_url"] = value.get("reference_url")
+    return entry
+
+
+def _reference_url(value, lora_id: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"LoRA {lora_id} reference_url must be a string")
+    parsed = urlparse(value)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise ValueError(f"LoRA {lora_id} reference_url must use https")
+    return value
+
+
+def normalize_loras(
+    entries: Iterable[Mapping] | Mapping[str, str | Mapping],
+) -> tuple[dict, ...]:
     if isinstance(entries, Mapping):
-        entries = [_entry_from_url(name, url) for name, url in entries.items()]
+        entries = [_entry_from_named_value(name, value) for name, value in entries.items()]
     if isinstance(entries, (str, bytes)) or not isinstance(entries, Iterable):
         raise ValueError("LORAS must be an iterable of mappings")
     normalized = []
@@ -114,6 +137,7 @@ def normalize_loras(entries: Iterable[Mapping] | Mapping[str, str]) -> tuple[dic
             "max_strength": maximum,
             "step": step,
             "prompt": prompt.strip() if isinstance(prompt, str) else None,
+            "reference_url": _reference_url(raw.get("reference_url"), lora_id),
         })
     return tuple(normalized)
 

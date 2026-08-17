@@ -46,6 +46,7 @@ export interface LoraConfig {
   max_strength: number;
   step: number;
   prompt?: string | null;
+  reference_url?: string | null;
 }
 
 export interface FramesDraft extends BaseDraft {

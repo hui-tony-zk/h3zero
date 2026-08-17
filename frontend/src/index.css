@@ -315,7 +315,7 @@
 
   .lora-mixer .lora-slider-row { gap: 12px; }
 
-  .lora-mixer .lora-slider-row label {
+  .lora-mixer .lora-slider-label {
     width: 150px;
     min-width: 120px;
     overflow: hidden;
@@ -325,6 +325,21 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+
+  .lora-slider-label > a {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 5px;
+    color: inherit;
+    text-decoration: none;
+    transition: color 140ms ease;
+  }
+
+  .lora-slider-label > a span { overflow: hidden; text-overflow: ellipsis; }
+  .lora-slider-label > a svg { flex: none; opacity: 0.65; }
+  .lora-slider-label > a:hover,
+  .lora-slider-label > a:focus-visible { color: var(--color-reelo-accent); outline: none; }
 
   .lora-mixer .lora-slider-row.compact { margin-top: 2px; }
   .lora-mixer .slider-container { min-width: 0; }
@@ -354,7 +369,7 @@
     .lora-compact-row { align-items: flex-start; flex-wrap: wrap; }
     .lora-chip-row { order: 4; flex-basis: 100%; }
     .lora-mixer .lora-slider-row { align-items: flex-start; flex-direction: column; gap: 6px; }
-    .lora-mixer .lora-slider-row label { width: 100%; }
+    .lora-mixer .lora-slider-label { width: 100%; }
     .lora-mixer .lora-slider-row.compact { flex-direction: row; }
     .lora-range-edge { display: none; }
   }

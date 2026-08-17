@@ -54,6 +54,10 @@ display name plus a direct public Hugging Face download URL:
 ```python
 LORAS = {
     "My Style": "https://huggingface.co/creator/model-repo/resolve/COMMIT_SHA/my-style.safetensors",
+    "My Linked Style": {
+        "download_url": "https://huggingface.co/creator/model-repo/resolve/COMMIT_SHA/linked-style.safetensors",
+        "reference_url": "https://example.com/linked-style",
+    },
 }
 ```
 
@@ -66,9 +70,10 @@ npm run deploy
 ```
 
 Configured LoRAs appear automatically in the composer mixer with a `0.0–1.5`
-strength control and are off by default. Use a commit SHA in the URL to pin the
-file. No Hugging Face token is used, so it must be publicly downloadable. The
-local catalog is not committed and each deployment keeps its own selection.
+strength control and are off by default. An optional `reference_url` makes the
+LoRA name an external link in Add mode. Use a commit SHA in the download URL to
+pin the file. No Hugging Face token is used, so it must be publicly downloadable.
+The local catalog is not committed and each deployment keeps its own selection.
 
 ## Create with frames or references
 

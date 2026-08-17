@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { clipDuration, clipFractionAtSourceTime, isProjectPlaybackBoundary, makeProjectClip, moveProjectClip, normalizeClip, projectClipFadeDuration, projectClipOpacity, projectClipTrimValue, projectMembershipsByJob, reorderProjectClips, restoreProjects, shouldToggleProjectPlayback, sourceTimeAtClipFraction } from "../src/lib/projects";
+import { clipDuration, clipFractionAtSourceTime, isProjectPlaybackBoundary, makeProjectClip, moveProjectClip, normalizeClip, projectClipFadeDuration, projectClipOpacity, projectClipTrimValue, projectMembershipsByJob, reorderProjectClips, restoreProjects, shouldToggleProjectPlayback, sourceTimeAtClipFraction, timelineEdgeScrollVelocity } from "../src/lib/projects";
+import { resolveProjectPlaybackPosition } from "../src/lib/projectPlayback";
 import type { Job, LocalProject, ProjectClip } from "../src/types";
 
 const clip = (id: string, order: number): ProjectClip => ({
@@ -45,6 +46,22 @@ test("project playhead maps trimmed clip positions in both directions", () => {
   assert.equal(clipFractionAtSourceTime(trimmed, 3), 0.5);
   assert.equal(sourceTimeAtClipFraction(trimmed, -1), 1);
   assert.equal(clipFractionAtSourceTime(trimmed, 20), 1);
+});
+
+test("project playback restores a valid per-project timeline position", () => {
+  const clips = [{ ...clip("first", 0), inPoint: 1, outPoint: 4 }, { ...clip("second", 1), inPoint: 2, outPoint: 5 }];
+  assert.deepEqual(resolveProjectPlaybackPosition(clips, { clipId: "second", sourceTime: 4.25 }), { clipId: "second", sourceTime: 4.25 });
+  assert.deepEqual(resolveProjectPlaybackPosition(clips, { clipId: "second", sourceTime: 20 }), { clipId: "second", sourceTime: 5 });
+  assert.deepEqual(resolveProjectPlaybackPosition(clips, { clipId: "missing", sourceTime: 3 }), { clipId: "first", sourceTime: 1 });
+  assert.equal(resolveProjectPlaybackPosition([], { clipId: "first", sourceTime: 2 }), null);
+});
+
+test("timeline edge scrolling accelerates toward either viewport edge", () => {
+  assert.equal(timelineEdgeScrollVelocity(500, 100, 900), 0);
+  assert.equal(timelineEdgeScrollVelocity(100, 100, 900), -18);
+  assert.equal(timelineEdgeScrollVelocity(900, 100, 900), 18);
+  assert.equal(timelineEdgeScrollVelocity(136, 100, 900), -9);
+  assert.equal(timelineEdgeScrollVelocity(864, 100, 900), 9);
 });
 
 test("project playback preserves play intent at a clip boundary", () => {

@@ -35,6 +35,25 @@ export function projectClipTrimValue(clip: ProjectClip, edge: "start" | "end", s
   );
 }
 
+export function timelineEdgeScrollVelocity(
+  clientX: number,
+  viewportLeft: number,
+  viewportRight: number,
+  threshold = 72,
+  maximum = 18,
+) {
+  if (threshold <= 0 || maximum <= 0 || viewportRight <= viewportLeft) return 0;
+  if (clientX < viewportLeft + threshold) {
+    const proximity = 1 - Math.max(0, clientX - viewportLeft) / threshold;
+    return -maximum * Math.min(1, proximity);
+  }
+  if (clientX > viewportRight - threshold) {
+    const proximity = 1 - Math.max(0, viewportRight - clientX) / threshold;
+    return maximum * Math.min(1, proximity);
+  }
+  return 0;
+}
+
 export function clipFractionAtSourceTime(clip: ProjectClip, sourceTime: number) {
   const sourceSpan = Math.max(MIN_CLIP_SECONDS, clip.outPoint - clip.inPoint);
   return Math.max(0, Math.min(1, (sourceTime - clip.inPoint) / sourceSpan));

@@ -23,6 +23,7 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragMoveEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
 import {
@@ -35,7 +36,8 @@ import { CSS } from "@dnd-kit/utilities";
 import { useLocalGeneratedVideoUrl } from "../hooks/useLocalGeneratedVideoUrl";
 import { ApiError, createProjectExport, getProjectExport } from "../lib/api/client";
 import { clearStoredProjectExport, downloadProjectExport, prepareProjectExportVideos, readStoredProjectExport, writeStoredProjectExport } from "../lib/projectExport";
-import { clipDuration, clipFractionAtSourceTime, isProjectPlaybackBoundary, MIN_CLIP_SECONDS, projectClipOpacity, projectClipTrimValue, shouldToggleProjectPlayback, sourceTimeAtClipFraction } from "../lib/projects";
+import { clearProjectPlaybackPosition, readProjectPlaybackPosition, resolveProjectPlaybackPosition, writeProjectPlaybackPosition, type ProjectPlaybackPosition } from "../lib/projectPlayback";
+import { clipDuration, clipFractionAtSourceTime, isProjectPlaybackBoundary, MIN_CLIP_SECONDS, projectClipOpacity, projectClipTrimValue, shouldToggleProjectPlayback, sourceTimeAtClipFraction, timelineEdgeScrollVelocity } from "../lib/projects";
 import type { AspectId, Job, LocalProject, ProjectClip, ProjectTransition } from "../types";
 import { RemixIcon } from "./icons";
 
@@ -44,7 +46,7 @@ const TIMELINE_DRAG_HOLD_MS = 250;
 const TIMELINE_SCROLL_CANCEL_X_PX = 6;
 const EXPORT_POLL_INTERVAL_MS = 1500;
 
-type ProjectPlayhead = { clipId: string; sourceTime: number };
+type ProjectPlayhead = ProjectPlaybackPosition;
 type ProjectSeekTarget = ProjectPlayhead & { requestId: number };
 
 function formatSeconds(value: number) {
@@ -112,7 +114,7 @@ export function Projects({ projects, jobs, selectedProjectId, onSelectProject, o
               jobs={jobs}
               onRename={(name) => onRenameProject(selectedProject.id, name)}
               onSetAspect={(aspect) => onSetAspect(selectedProject.id, aspect)}
-              onDelete={() => { if (confirm(`Delete “${selectedProject.name}”? Its cached videos will stay on this device.`)) onDeleteProject(selectedProject.id); }}
+              onDelete={() => { if (confirm(`Delete “${selectedProject.name}”? Its cached videos will stay on this device.`)) { clearProjectPlaybackPosition(selectedProject.id); onDeleteProject(selectedProject.id); } }}
               onUpdateClip={(clipId, patch) => onUpdateClip(selectedProject.id, clipId, patch)}
               onRemoveClip={(clipId) => onRemoveClip(selectedProject.id, clipId)}
               onReorderClips={(fromId, toId) => onReorderClips(selectedProject.id, fromId, toId)}
@@ -145,10 +147,16 @@ function ProjectEditor({ project, jobs, onRename, onSetAspect, onDelete, onUpdat
   onRemix: (job: Job) => void;
 }) {
   const orderedClips = useMemo(() => [...project.clips].sort((a, b) => a.order - b.order), [project.clips]);
-  const [selectedClipId, setSelectedClipId] = useState<string | null>(orderedClips[0]?.id ?? null);
-  const [playhead, setPlayhead] = useState<ProjectPlayhead | null>(() => orderedClips[0] ? { clipId: orderedClips[0].id, sourceTime: orderedClips[0].inPoint } : null);
-  const [seekTarget, setSeekTarget] = useState<ProjectSeekTarget | null>(null);
-  const seekRequestIdRef = useRef(0);
+  const initialPlayheadRef = useRef<ProjectPlayhead | null | undefined>(undefined);
+  if (initialPlayheadRef.current === undefined) {
+    initialPlayheadRef.current = resolveProjectPlaybackPosition(orderedClips, readProjectPlaybackPosition(project.id));
+  }
+  const initialPlayhead = initialPlayheadRef.current;
+  const [selectedClipId, setSelectedClipId] = useState<string | null>(initialPlayhead?.clipId ?? null);
+  const [playhead, setPlayhead] = useState<ProjectPlayhead | null>(initialPlayhead);
+  const [seekTarget, setSeekTarget] = useState<ProjectSeekTarget | null>(() => initialPlayhead ? { ...initialPlayhead, requestId: 1 } : null);
+  const [restartRequestId, setRestartRequestId] = useState(0);
+  const seekRequestIdRef = useRef(initialPlayhead ? 1 : 0);
   const activeExportRef = useRef<string | null>(null);
   const [name, setName] = useState(project.name);
   const [exporting, setExporting] = useState(false);
@@ -170,13 +178,18 @@ function ProjectEditor({ project, jobs, onRename, onSetAspect, onDelete, onUpdat
     }
   }, [orderedClips, selectedClip, selectedClipId]);
 
+  useEffect(() => {
+    if (playhead) writeProjectPlaybackPosition(project.id, playhead);
+    else clearProjectPlaybackPosition(project.id);
+  }, [playhead, project.id]);
+
   const seekPreview = useCallback((clipId: string, sourceTime: number) => {
     const clip = orderedClips.find((candidate) => candidate.id === clipId);
     if (!clip) return;
     const boundedTime = Math.max(clip.inPoint, Math.min(clip.outPoint, sourceTime));
     const target = { clipId, sourceTime: boundedTime, requestId: ++seekRequestIdRef.current };
     setSelectedClipId(clipId);
-    setPlayhead(target);
+    setPlayhead({ clipId, sourceTime: boundedTime });
     setSeekTarget(target);
   }, [orderedClips]);
 
@@ -187,6 +200,12 @@ function ProjectEditor({ project, jobs, onRename, onSetAspect, onDelete, onUpdat
   const updatePreviewPosition = useCallback((clipId: string, sourceTime: number) => {
     setPlayhead({ clipId, sourceTime });
   }, []);
+  const restartTimeline = useCallback(() => {
+    const firstClip = orderedClips[0];
+    if (!firstClip) return;
+    seekPreview(firstClip.id, firstClip.inPoint);
+    setRestartRequestId((current) => current + 1);
+  }, [orderedClips, seekPreview]);
 
   const pollExportToCompletion = useCallback(async (exportId: string, filename: string) => {
     activeExportRef.current = exportId;
@@ -273,12 +292,12 @@ function ProjectEditor({ project, jobs, onRename, onSetAspect, onDelete, onUpdat
       <AnimatePresence initial={false}>{(exportMessage || exportError) && <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className={`overflow-hidden border-b px-5 py-2 text-[10px] ${exportError ? "border-red-400/10 bg-red-500/[.045] text-red-300" : "border-white/7 bg-white/[.018] text-white/42"}`}>{exportError ?? exportMessage}</motion.div>}</AnimatePresence>
 
       <div className="grid min-h-0 flex-1 grid-rows-[minmax(300px,1fr)_auto] lg:grid-cols-[minmax(0,1fr)_260px] lg:grid-rows-[minmax(0,1fr)_auto]">
-        <ProjectPreview clips={orderedClips} jobsById={jobsById} selectedClipId={selectedClip?.id ?? null} aspect={project.aspect} seekTarget={seekTarget} onSelectClip={selectPreviewClip} onPosition={updatePreviewPosition} onUpdateClip={onUpdateClip} onRemoveClip={onRemoveClip} />
+        <ProjectPreview clips={orderedClips} jobsById={jobsById} selectedClipId={selectedClip?.id ?? null} aspect={project.aspect} seekTarget={seekTarget} restartRequestId={restartRequestId} onSelectClip={selectPreviewClip} onPosition={updatePreviewPosition} onUpdateClip={onUpdateClip} onRemoveClip={onRemoveClip} />
         <AnimatePresence mode="wait">
           <ClipInspector key={selectedClip?.id ?? "empty"} clip={selectedClip} job={selectedClip ? jobsById.get(selectedClip.jobId) ?? null : null} index={selectedIndex} clipCount={orderedClips.length} onUpdate={onUpdateClip} onRemove={(clipId) => onRemoveClip(clipId)} onMove={onMoveClip} onRemix={onRemix} />
         </AnimatePresence>
-        <div className="border-t border-white/7 lg:col-span-2">
-          <div className="flex items-center justify-between px-4 py-2.5 sm:px-5"><span className="text-[9px] font-bold uppercase tracking-[0.16em] text-white/32">Timeline</span><button type="button" onClick={onOpenLibrary} className="flex items-center gap-1.5 text-[10px] font-semibold text-reelo-accent hover:text-white"><Plus size={12} /> Add from videos</button></div>
+        <div data-project-timeline className="border-t border-white/7 lg:col-span-2">
+          <div className="flex items-center justify-between px-4 py-2.5 sm:px-5"><span className="text-[9px] font-bold uppercase tracking-[0.16em] text-white/32">Timeline</span><div className="flex items-center gap-3"><button type="button" disabled={!orderedClips.length} onClick={restartTimeline} className="flex items-center gap-1.5 text-[10px] font-semibold text-white/42 hover:text-white disabled:opacity-25" title="Restart playback from the beginning"><RotateCcw size={11} /> Restart</button><button type="button" onClick={onOpenLibrary} className="flex items-center gap-1.5 text-[10px] font-semibold text-reelo-accent hover:text-white"><Plus size={12} /> Add from videos</button></div></div>
           {orderedClips.length ? <TimelineStrip clips={orderedClips} jobsById={jobsById} selectedClipId={selectedClip?.id ?? null} playhead={playhead} onSelect={selectPreviewClip} onSeek={seekPreview} onReorder={onReorderClips} onSetTransition={(clipId, transitionIn) => onUpdateClip(clipId, { transitionIn })} /> : <div className="px-5 pb-5 text-[11px] text-white/35">No clips yet. Add a completed result from Videos.</div>}
         </div>
       </div>
@@ -307,6 +326,8 @@ function TimelineStrip({ clips, jobsById, selectedClipId, playhead, onSelect, on
   const activeClip = activeClipId ? clips.find((clip) => clip.id === activeClipId) ?? null : null;
   const clipNodesRef = useRef<Map<string, HTMLButtonElement>>(new Map());
   const timelineRef = useRef<HTMLDivElement | null>(null);
+  const edgeScrollFrameRef = useRef<number | null>(null);
+  const edgeScrollVelocityRef = useRef(0);
   const playheadClip = clips.find((clip) => clip.id === playhead?.clipId) ?? clips.find((clip) => clip.id === selectedClipId) ?? clips[0];
   const playheadIndex = clips.findIndex((clip) => clip.id === playheadClip?.id);
   const playheadFraction = playheadClip ? clipFractionAtSourceTime(playheadClip, playhead?.clipId === playheadClip.id ? playhead.sourceTime : playheadClip.inPoint) : 0;
@@ -322,8 +343,54 @@ function TimelineStrip({ clips, jobsById, selectedClipId, playhead, onSelect, on
     clipNodesRef.current.get(selectedClipId)?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
   }, [activeClipId, seeking, selectedClipId]);
 
-  const handleDragStart = (event: DragStartEvent) => setActiveClipId(String(event.active.id));
+  const stopEdgeScroll = useCallback(() => {
+    edgeScrollVelocityRef.current = 0;
+    if (edgeScrollFrameRef.current !== null) cancelAnimationFrame(edgeScrollFrameRef.current);
+    edgeScrollFrameRef.current = null;
+  }, []);
+
+  const runEdgeScroll = useCallback(() => {
+    if (edgeScrollFrameRef.current !== null) return;
+    const scroll = () => {
+      const timeline = timelineRef.current;
+      const velocity = edgeScrollVelocityRef.current;
+      if (!timeline || velocity === 0) {
+        edgeScrollFrameRef.current = null;
+        return;
+      }
+      const previous = timeline.scrollLeft;
+      timeline.scrollLeft += velocity;
+      if (timeline.scrollLeft === previous) {
+        edgeScrollVelocityRef.current = 0;
+        edgeScrollFrameRef.current = null;
+        return;
+      }
+      edgeScrollFrameRef.current = requestAnimationFrame(scroll);
+    };
+    edgeScrollFrameRef.current = requestAnimationFrame(scroll);
+  }, []);
+
+  useEffect(() => stopEdgeScroll, [stopEdgeScroll]);
+
+  const handleDragStart = (event: DragStartEvent) => {
+    stopEdgeScroll();
+    setActiveClipId(String(event.active.id));
+  };
+  const handleDragMove = (event: DragMoveEvent) => {
+    const timeline = timelineRef.current;
+    const translated = event.active.rect.current.translated;
+    if (!timeline || !translated || timeline.scrollWidth <= timeline.clientWidth) {
+      stopEdgeScroll();
+      return;
+    }
+    const viewport = timeline.getBoundingClientRect();
+    const leadingEdge = event.delta.x < 0 ? translated.left : translated.right;
+    edgeScrollVelocityRef.current = timelineEdgeScrollVelocity(leadingEdge, viewport.left, viewport.right);
+    if (edgeScrollVelocityRef.current) runEdgeScroll();
+    else stopEdgeScroll();
+  };
   const handleDragEnd = (event: DragEndEvent) => {
+    stopEdgeScroll();
     setActiveClipId(null);
     if (!event.over || event.active.id === event.over.id) return;
     onReorder(String(event.active.id), String(event.over.id));
@@ -368,7 +435,7 @@ function TimelineStrip({ clips, jobsById, selectedClipId, playhead, onSelect, on
   }, [clips, onSeek, playhead, playheadClip, playheadIndex]);
 
   return (
-    <DndContext sensors={sensors} collisionDetection={closestCenter} autoScroll={false} onDragStart={handleDragStart} onDragCancel={() => setActiveClipId(null)} onDragEnd={handleDragEnd}>
+    <DndContext sensors={sensors} collisionDetection={closestCenter} autoScroll={false} onDragStart={handleDragStart} onDragMove={handleDragMove} onDragCancel={() => { stopEdgeScroll(); setActiveClipId(null); }} onDragEnd={handleDragEnd}>
       <SortableContext items={itemIds} strategy={horizontalListSortingStrategy}>
         <div ref={timelineRef} data-project-timeline role="region" tabIndex={0} className="overflow-x-auto px-4 pb-4 pt-1 outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-reelo-accent/45 sm:px-5" aria-label="Project timeline">
           <div className="relative w-max pt-7">
@@ -509,12 +576,13 @@ const TimelineClipFace = forwardRef<HTMLButtonElement, TimelineClipFaceProps>(({
 });
 TimelineClipFace.displayName = "TimelineClipFace";
 
-function ProjectPreview({ clips, jobsById, selectedClipId, aspect, seekTarget, onSelectClip, onPosition, onUpdateClip, onRemoveClip }: {
+function ProjectPreview({ clips, jobsById, selectedClipId, aspect, seekTarget, restartRequestId, onSelectClip, onPosition, onUpdateClip, onRemoveClip }: {
   clips: ProjectClip[];
   jobsById: Map<string, Job>;
   selectedClipId: string | null;
   aspect: AspectId;
   seekTarget: ProjectSeekTarget | null;
+  restartRequestId: number;
   onSelectClip: (id: string) => void;
   onPosition: (clipId: string, sourceTime: number) => void;
   onUpdateClip: (clipId: string, patch: Partial<ProjectClip>) => void;
@@ -525,6 +593,7 @@ function ProjectPreview({ clips, jobsById, selectedClipId, aspect, seekTarget, o
   const fadeAnimationRef = useRef<number | null>(null);
   const continuePlaybackRef = useRef(false);
   const advancingRef = useRef(false);
+  const handledRestartRequestRef = useRef(0);
   const selectedIndex = Math.max(0, clips.findIndex((clip) => clip.id === selectedClipId));
   const clip = clips[selectedIndex] ?? null;
   const localVideo = useLocalGeneratedVideoUrl(clip?.jobId ?? null, clip ? jobsById.get(clip.jobId)?.contentUrl : null);
@@ -559,6 +628,19 @@ function ProjectPreview({ clips, jobsById, selectedClipId, aspect, seekTarget, o
   useEffect(() => {
     if (videoRef.current) updatePreviewFade(videoRef.current);
   }, [updatePreviewFade]);
+
+  useEffect(() => {
+    if (!restartRequestId || restartRequestId === handledRestartRequestRef.current || !clip) return;
+    handledRestartRequestRef.current = restartRequestId;
+    continuePlaybackRef.current = true;
+    advancingRef.current = true;
+    const video = videoRef.current;
+    if (!video || video.readyState < 1) return;
+    advancingRef.current = false;
+    video.currentTime = clip.inPoint;
+    onPosition(clip.id, clip.inPoint);
+    void video.play().catch(() => { continuePlaybackRef.current = false; });
+  }, [clip, onPosition, restartRequestId]);
 
   useEffect(() => {
     const handlePlaybackShortcut = (event: KeyboardEvent) => {

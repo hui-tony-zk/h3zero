@@ -1,4 +1,4 @@
-import { AlertCircle, ArrowDownToLine, Film, FolderPlus, Heart, LoaderCircle, SlidersHorizontal, Trash2, X } from "lucide-react";
+import { AlertCircle, ArrowDownToLine, Film, FolderPlus, Heart, LoaderCircle, Replace, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import { groupJobs } from "../lib/jobs";
@@ -32,6 +32,7 @@ function batchStartPadding(job: Job) {
 }
 
 type PlaybackReady = (video: HTMLVideoElement) => void;
+type ReplacementTarget = { currentJobId: string; label: string; onCancel: () => void };
 
 function showVideoThumbnail(video: HTMLVideoElement) {
   video.pause();
@@ -51,8 +52,9 @@ function ProjectChips({ memberships, onOpenProject, className = "" }: { membersh
   </div>;
 }
 
-function FullscreenVideo({ job, memberships, autoplayEnabled, onPlaybackReady, onAddToProject, onOpenProject, onClose }: { job: Job; memberships: ProjectMembership[]; autoplayEnabled: boolean; onPlaybackReady: PlaybackReady; onAddToProject: () => void; onOpenProject: (projectId: string) => void; onClose: () => void }) {
+function FullscreenVideo({ job, memberships, autoplayEnabled, onPlaybackReady, onProjectAction, replacementTarget, onOpenProject, onClose }: { job: Job; memberships: ProjectMembership[]; autoplayEnabled: boolean; onPlaybackReady: PlaybackReady; onProjectAction: () => void; replacementTarget?: ReplacementTarget; onOpenProject: (projectId: string) => void; onClose: () => void }) {
   const videoUrl = useGeneratedVideoUrl(job);
+  const isCurrentClip = replacementTarget?.currentJobId === job.id;
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
@@ -66,7 +68,7 @@ function FullscreenVideo({ job, memberships, autoplayEnabled, onPlaybackReady, o
       {videoUrl && <video data-h3-autoplay-video src={videoUrl} autoPlay={autoplayEnabled} loop controls playsInline onLoadedMetadata={(event) => onPlaybackReady(event.currentTarget)} className="max-h-full max-w-full object-contain" />}
       <ProjectChips memberships={memberships} onOpenProject={onOpenProject} className="fixed left-4 top-4 sm:left-6 sm:top-6" />
       <div className="fixed right-4 top-4 flex gap-2 sm:right-6 sm:top-6">
-        <button type="button" onClick={onAddToProject} className="flex size-10 items-center justify-center rounded-full border border-white/12 bg-black/60 text-white/80 backdrop-blur-md hover:bg-white/10 hover:text-reelo-accent" aria-label="Add video to project" title="Add to project"><FolderPlus size={16} /></button>
+        <button type="button" disabled={isCurrentClip} onClick={onProjectAction} className="flex size-10 items-center justify-center rounded-full border border-white/12 bg-black/60 text-white/80 backdrop-blur-md hover:bg-white/10 hover:text-reelo-accent disabled:cursor-not-allowed disabled:opacity-30" aria-label={replacementTarget ? "Replace project clip with this video" : "Add video to project"} title={isCurrentClip ? "This is the current clip" : replacementTarget ? "Use as replacement" : "Add to project"}>{replacementTarget ? <Replace size={16} /> : <FolderPlus size={16} />}</button>
         {videoUrl && <a href={videoUrl} download={`h3-${job.id}.mp4`} className="flex size-10 items-center justify-center rounded-full border border-white/12 bg-black/60 text-white/80 backdrop-blur-md hover:bg-white/10 hover:text-white" aria-label="Download video" title="Download"><ArrowDownToLine size={16} /></a>}
         <button type="button" onClick={onClose} className="flex size-10 items-center justify-center rounded-full border border-white/12 bg-black/60 text-white/80 backdrop-blur-md hover:bg-white/10 hover:text-white" aria-label="Close video viewer"><X size={17} /></button>
       </div>
@@ -74,14 +76,15 @@ function FullscreenVideo({ job, memberships, autoplayEnabled, onPlaybackReady, o
   );
 }
 
-function JobCard({ job, memberships, autoplayEnabled, onPlaybackReady, favoritePending, onFavorite, onAddToProject, onOpenProject, onRemix, onDelete, onCancel, onView, onSettings }: {
+function JobCard({ job, memberships, autoplayEnabled, onPlaybackReady, favoritePending, onFavorite, onProjectAction, replacementTarget, onOpenProject, onRemix, onDelete, onCancel, onView, onSettings }: {
   job: Job;
   memberships: ProjectMembership[];
   autoplayEnabled: boolean;
   onPlaybackReady: PlaybackReady;
   favoritePending: boolean;
   onFavorite: () => void;
-  onAddToProject: () => void;
+  onProjectAction: () => void;
+  replacementTarget?: ReplacementTarget;
   onOpenProject: (projectId: string) => void;
   onRemix: () => void;
   onDelete: () => void;
@@ -94,6 +97,7 @@ function JobCard({ job, memberships, autoplayEnabled, onPlaybackReady, favoriteP
   const progress = job.progress?.percent;
   const samplingProfile = job.metadata?.sampling_profile ?? job.samplingProfile ?? (job.turbo ? "turbo_4" : "spectrum");
   const accelerated = samplingProfile !== "base";
+  const isCurrentClip = replacementTarget?.currentJobId === job.id;
   const samplingLabel = profileLabel(samplingProfile);
   const ratio = aspectNumber(job);
   const style = {
@@ -159,7 +163,7 @@ function JobCard({ job, memberships, autoplayEnabled, onPlaybackReady, favoriteP
 
       {job.status !== "uploading" && <div className="absolute bottom-3 right-3 flex gap-1.5 sm:pointer-events-none sm:translate-y-1 sm:opacity-0 sm:transition-[opacity,transform] sm:duration-150 sm:group-hover:pointer-events-auto sm:group-hover:translate-y-0 sm:group-hover:opacity-100 sm:group-focus-within:pointer-events-auto sm:group-focus-within:translate-y-0 sm:group-focus-within:opacity-100">
         <button type="button" onClick={(event) => { event.stopPropagation(); onSettings(); }} className="flex size-8 items-center justify-center rounded-full border border-white/12 bg-black/62 text-white/75 backdrop-blur-md hover:bg-black hover:text-white" aria-label="Show generation settings" title="Generation settings"><SlidersHorizontal size={13} /></button>
-        {job.status === "completed" && <button type="button" onClick={(event) => { event.stopPropagation(); onAddToProject(); }} className="flex size-8 items-center justify-center rounded-full border border-white/12 bg-black/62 text-white/75 backdrop-blur-md hover:bg-black hover:text-reelo-accent" aria-label="Add video to project" title="Add to project"><FolderPlus size={13} /></button>}
+        {job.status === "completed" && <button type="button" disabled={isCurrentClip} onClick={(event) => { event.stopPropagation(); onProjectAction(); }} className="flex size-8 items-center justify-center rounded-full border border-white/12 bg-black/62 text-white/75 backdrop-blur-md hover:bg-black hover:text-reelo-accent disabled:cursor-not-allowed disabled:opacity-30" aria-label={replacementTarget ? "Replace project clip with this video" : "Add video to project"} title={isCurrentClip ? "This is the current clip" : replacementTarget ? "Use as replacement" : "Add to project"}>{replacementTarget ? <Replace size={13} /> : <FolderPlus size={13} />}</button>}
         <button type="button" onClick={(event) => { event.stopPropagation(); onRemix(); }} className="flex size-8 items-center justify-center rounded-full border border-white/12 bg-black/62 text-white/75 backdrop-blur-md hover:bg-black hover:text-white" aria-label="Remix this job" title="Remix"><RemixIcon size={13} /></button>
         <button type="button" onClick={(event) => { event.stopPropagation(); if (active) onCancel(); else onDelete(); }} className="flex size-8 items-center justify-center rounded-full border border-white/12 bg-black/62 text-white/75 backdrop-blur-md hover:bg-red-500 hover:text-white" aria-label={active ? "Cancel job" : "Delete job"} title={active ? "Cancel job" : "Delete"}><Trash2 size={13} /></button>
       </div>}
@@ -167,7 +171,15 @@ function JobCard({ job, memberships, autoplayEnabled, onPlaybackReady, favoriteP
   );
 }
 
-export function JobCanvas({ jobs, projectMemberships, autoplayEnabled, favoritePendingIds, onFavorite, onAddToProject, onOpenProject, onRemix, onDelete, onCancel }: { jobs: Job[]; projectMemberships: Map<string, ProjectMembership[]>; autoplayEnabled: boolean; favoritePendingIds: Set<string>; onFavorite: (job: Job) => void; onAddToProject: (job: Job) => void; onOpenProject: (projectId: string) => void; onRemix: (job: Job) => void; onDelete: (job: Job) => void; onCancel: (job: Job) => void }) {
+function ReplacementBanner({ target }: { target: ReplacementTarget }) {
+  return <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="fixed left-1/2 top-14 z-40 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-3 rounded-full border border-reelo-accent/25 bg-[#111]/92 px-3 py-2 shadow-xl backdrop-blur-xl sm:top-16">
+    <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-reelo-accent/15 text-reelo-accent"><Replace size={12} /></span>
+    <span className="truncate text-[10px] font-semibold text-white/72">Choose a replacement for <b className="font-bold text-white">{target.label}</b></span>
+    <button type="button" onClick={target.onCancel} className="shrink-0 rounded-full px-2 py-1 text-[9px] font-bold text-white/45 hover:bg-white/7 hover:text-white">Cancel</button>
+  </motion.div>;
+}
+
+export function JobCanvas({ jobs, projectMemberships, autoplayEnabled, favoritePendingIds, replacementTarget, onFavorite, onProjectAction, onOpenProject, onRemix, onDelete, onCancel }: { jobs: Job[]; projectMemberships: Map<string, ProjectMembership[]>; autoplayEnabled: boolean; favoritePendingIds: Set<string>; replacementTarget?: ReplacementTarget; onFavorite: (job: Job) => void; onProjectAction: (job: Job) => void; onOpenProject: (projectId: string) => void; onRemix: (job: Job) => void; onDelete: (job: Job) => void; onCancel: (job: Job) => void }) {
   const [viewer, setViewer] = useState<Job | null>(null);
   const [settingsJob, setSettingsJob] = useState<Job | null>(null);
 
@@ -191,13 +203,13 @@ export function JobCanvas({ jobs, projectMemberships, autoplayEnabled, favoriteP
 
   if (!jobs.length) {
     return (
-      <main className="mx-auto flex min-h-dvh max-w-[1180px] items-center justify-center px-6 pb-24 text-center">
+      <><AnimatePresence>{replacementTarget && <ReplacementBanner target={replacementTarget} />}</AnimatePresence><main className="mx-auto flex min-h-dvh max-w-[1180px] items-center justify-center px-6 pb-24 text-center">
         <div className="max-w-sm">
           <span className="mx-auto flex size-12 items-center justify-center rounded-full border border-white/8 bg-white/[0.025] text-white/24"><Film size={19} /></span>
           <h1 className="mt-5 text-lg font-semibold tracking-tight text-reelo-text">Make a video with H3Zero</h1>
           <p className="mx-auto mt-2 max-w-[34ch] text-xs leading-5 text-reelo-dim">Open the composer below, add references or frames, and describe what should happen.</p>
         </div>
-      </main>
+      </main></>
     );
   }
 
@@ -205,16 +217,17 @@ export function JobCanvas({ jobs, projectMemberships, autoplayEnabled, favoriteP
 
   return (
     <>
+      <AnimatePresence>{replacementTarget && <ReplacementBanner target={replacementTarget} />}</AnimatePresence>
       <main className="h-dvh overflow-hidden pb-[60px] pt-12">
         <div className="flex h-full w-full gap-3 overflow-x-auto px-[9vw] [scrollbar-color:rgba(255,255,255,0.22)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb:hover]:bg-white/40 [&::-webkit-scrollbar-track]:mx-[12vw] [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-track]:bg-white/[0.045] sm:gap-5 sm:px-[12vw]" aria-label="Video batches">
           {batches.map((batch) => <section key={batch.id} aria-label="Generation batch" className="h-full shrink-0 overflow-y-auto overscroll-y-contain [scrollbar-color:rgba(255,255,255,0.16)_transparent] [scrollbar-width:thin]">
             <div style={batch.jobs.length > 1 ? { paddingTop: batchStartPadding(batch.jobs[0]) } : undefined} className={`flex min-h-full flex-col items-center gap-3 pb-4 sm:gap-5 ${batch.jobs.length === 1 ? "justify-center pt-4" : "justify-start"}`}>
-              {batch.jobs.map((job) => <JobCard key={job.id} job={job} memberships={projectMemberships.get(job.id) ?? []} autoplayEnabled={autoplayEnabled} onPlaybackReady={applyAutoplay} favoritePending={favoritePendingIds.has(job.id)} onFavorite={() => onFavorite(job)} onAddToProject={() => onAddToProject(job)} onOpenProject={onOpenProject} onRemix={() => onRemix(job)} onDelete={() => onDelete(job)} onCancel={() => onCancel(job)} onView={() => setViewer(job)} onSettings={() => setSettingsJob(job)} />)}
+              {batch.jobs.map((job) => <JobCard key={job.id} job={job} memberships={projectMemberships.get(job.id) ?? []} autoplayEnabled={autoplayEnabled} onPlaybackReady={applyAutoplay} favoritePending={favoritePendingIds.has(job.id)} onFavorite={() => onFavorite(job)} onProjectAction={() => onProjectAction(job)} replacementTarget={replacementTarget} onOpenProject={onOpenProject} onRemix={() => onRemix(job)} onDelete={() => onDelete(job)} onCancel={() => onCancel(job)} onView={() => setViewer(job)} onSettings={() => setSettingsJob(job)} />)}
             </div>
           </section>)}
         </div>
       </main>
-      <AnimatePresence>{viewer && <FullscreenVideo job={viewer} memberships={projectMemberships.get(viewer.id) ?? []} autoplayEnabled={autoplayEnabled} onPlaybackReady={applyAutoplay} onAddToProject={() => onAddToProject(viewer)} onOpenProject={onOpenProject} onClose={() => setViewer(null)} />}</AnimatePresence>
+      <AnimatePresence>{viewer && <FullscreenVideo job={viewer} memberships={projectMemberships.get(viewer.id) ?? []} autoplayEnabled={autoplayEnabled} onPlaybackReady={applyAutoplay} onProjectAction={() => onProjectAction(viewer)} replacementTarget={replacementTarget} onOpenProject={onOpenProject} onClose={() => setViewer(null)} />}</AnimatePresence>
       <AnimatePresence>{settingsJob && <GenerationSettingsDialog job={settingsJob} onClose={() => setSettingsJob(null)} />}</AnimatePresence>
     </>
   );

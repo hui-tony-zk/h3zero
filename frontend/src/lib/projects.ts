@@ -156,6 +156,17 @@ export function makeProjectClip(job: Job, order: number, now = Date.now()): Proj
   };
 }
 
+export function replaceProjectClip(clip: ProjectClip, job: Job): ProjectClip {
+  const replacement = makeProjectClip(job, clip.order, clip.createdAt);
+  return normalizeClip({
+    ...clip,
+    jobId: replacement.jobId,
+    inPoint: replacement.inPoint,
+    outPoint: replacement.outPoint,
+    sourceDuration: replacement.sourceDuration,
+  });
+}
+
 export function reorderProjectClips(clips: ProjectClip[], fromId: string, toId: string) {
   const ordered = [...clips].sort((a, b) => a.order - b.order);
   const fromIndex = ordered.findIndex((clip) => clip.id === fromId);

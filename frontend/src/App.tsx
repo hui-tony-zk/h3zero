@@ -19,9 +19,18 @@ import { loadGeneratedVideoBlob, removeGeneratedVideo } from "./lib/generatedVid
 import { readCloudSyncUsername, writeCloudSyncUsername } from "./lib/cloudSync";
 import { pendingJob, uploadingJob } from "./lib/jobs";
 import { projectMembershipsByJob } from "./lib/projects";
+import { writeProjectPlaybackPosition } from "./lib/projectPlayback";
 import type { H3Specs, Job } from "./types";
 
 const AUTOPLAY_STORAGE_KEY = "h3zero:autoplay";
+
+type ProjectReplacementTarget = {
+  projectId: string;
+  clipId: string;
+  currentJobId: string;
+  label: string;
+  projectName: string;
+};
 
 function readAutoplayPreference() {
   try {
@@ -39,6 +48,7 @@ export default function App() {
   const [workspace, setWorkspace] = useState<"videos" | "projects">("videos");
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(() => projects.projects[0]?.id ?? null);
   const [projectPickerJob, setProjectPickerJob] = useState<Job | null>(null);
+  const [projectReplacementTarget, setProjectReplacementTarget] = useState<ProjectReplacementTarget | null>(null);
   const [specs, setSpecs] = useState<H3Specs | null>(null);
   const [specError, setSpecError] = useState<string | null>(null);
   const [launching, setLaunching] = useState(false);
@@ -170,6 +180,7 @@ export default function App() {
     setToast((current) => current?.id === id ? null : current);
   }, []);
   const openProject = useCallback((projectId: string) => {
+    setProjectReplacementTarget(null);
     setSelectedProjectId(projectId);
     setWorkspace("projects");
   }, []);
@@ -270,6 +281,7 @@ export default function App() {
   const remix = useCallback(async (job: Job) => {
     try {
       await drafts.restoreInputs(job);
+      setProjectReplacementTarget(null);
       setWorkspace("videos");
       setComposerOpen(true);
     } catch (error) {
@@ -286,6 +298,51 @@ export default function App() {
     showProjectAddedToast(projectId, job.id);
   }, [projects, showProjectAddedToast]);
 
+  const openLibrary = useCallback(() => {
+    setProjectReplacementTarget(null);
+    setWorkspace("videos");
+  }, []);
+
+  const beginClipReplacement = useCallback((projectId: string, clipId: string) => {
+    const project = projects.projects.find((candidate) => candidate.id === projectId);
+    const orderedClips = project ? [...project.clips].sort((a, b) => a.order - b.order) : [];
+    const clipIndex = orderedClips.findIndex((clip) => clip.id === clipId);
+    const clip = orderedClips[clipIndex];
+    if (!project || !clip) return;
+    setProjectPickerJob(null);
+    setProjectReplacementTarget({
+      projectId,
+      clipId,
+      currentJobId: clip.jobId,
+      label: `Clip ${clipIndex + 1} in ${project.name}`,
+      projectName: project.name,
+    });
+    setWorkspace("videos");
+  }, [projects.projects]);
+
+  const cancelClipReplacement = useCallback(() => {
+    if (projectReplacementTarget) setSelectedProjectId(projectReplacementTarget.projectId);
+    setProjectReplacementTarget(null);
+    setWorkspace("projects");
+  }, [projectReplacementTarget]);
+
+  const handleProjectAction = useCallback((job: Job) => {
+    if (!projectReplacementTarget) {
+      setProjectPickerJob(job);
+      return;
+    }
+    if (job.id === projectReplacementTarget.currentJobId) return;
+    projects.replaceClip(projectReplacementTarget.projectId, projectReplacementTarget.clipId, job);
+    writeProjectPlaybackPosition(projectReplacementTarget.projectId, { clipId: projectReplacementTarget.clipId, sourceTime: 0 });
+    setSelectedProjectId(projectReplacementTarget.projectId);
+    setProjectReplacementTarget(null);
+    setWorkspace("projects");
+    setToast({
+      id: `project-replaced:${projectReplacementTarget.clipId}:${Date.now()}`,
+      message: `Replaced clip in ${projectReplacementTarget.projectName}`,
+    });
+  }, [projectReplacementTarget, projects]);
+
   const visibleJobs = pendingDeleteId ? jobs.filter((job) => job.id !== pendingDeleteId) : jobs;
   const projectMemberships = useMemo(() => projectMembershipsByJob(projects.projects), [projects.projects]);
 
@@ -299,7 +356,7 @@ export default function App() {
       <div className="text-[11px] font-bold tracking-[0.16em] text-white/82" aria-label="H3Zero">
         H3<span className="text-reelo-accent">Zero</span>
       </div>
-      <nav className="pointer-events-auto flex rounded-full border border-white/7 bg-black/35 p-0.5 backdrop-blur-md" aria-label="Workspace"><button type="button" onClick={() => setWorkspace("videos")} className={`flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[9px] font-bold transition sm:px-3 ${workspace === "videos" ? "bg-white/10 text-white" : "text-white/38 hover:text-white/70"}`}><Film size={11} /> Videos</button><button type="button" onClick={() => setWorkspace("projects")} className={`flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[9px] font-bold transition sm:px-3 ${workspace === "projects" ? "bg-white/10 text-white" : "text-white/38 hover:text-white/70"}`}><Layers3 size={11} /> Projects</button></nav>
+      <nav className="pointer-events-auto flex rounded-full border border-white/7 bg-black/35 p-0.5 backdrop-blur-md" aria-label="Workspace"><button type="button" onClick={() => setWorkspace("videos")} className={`flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[9px] font-bold transition sm:px-3 ${workspace === "videos" ? "bg-white/10 text-white" : "text-white/38 hover:text-white/70"}`}><Film size={11} /> Videos</button><button type="button" onClick={() => { setProjectReplacementTarget(null); setWorkspace("projects"); }} className={`flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[9px] font-bold transition sm:px-3 ${workspace === "projects" ? "bg-white/10 text-white" : "text-white/38 hover:text-white/70"}`}><Layers3 size={11} /> Projects</button></nav>
       <div className="pointer-events-auto ml-auto flex items-center gap-1">
         <button type="button" onClick={() => { pendingFavoriteRef.current = null; setCloudSyncOpen(true); }} className="flex min-h-8 min-w-0 items-center gap-1.5 rounded-full px-2 text-[10px] font-medium text-white/56 transition hover:bg-white/6 hover:text-white sm:px-2.5" title={cloudSyncUsername ? "Change Modal cloud sync name" : "Set up Modal cloud sync"}>
           <Cloud size={12} className={cloudSyncUsername ? "text-reelo-accent" : ""} />
@@ -326,7 +383,7 @@ export default function App() {
       </div>
     </motion.header>
     <AnimatePresence mode="wait">
-      {workspace === "videos" ? <motion.div key="videos" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}><JobCanvas jobs={visibleJobs} projectMemberships={projectMemberships} autoplayEnabled={autoplayEnabled} favoritePendingIds={favoritePendingIds} onFavorite={requestFavorite} onAddToProject={setProjectPickerJob} onOpenProject={openProject} onRemix={(job) => void remix(job)} onDelete={remove} onCancel={cancel} /></motion.div> : <Projects key="projects" projects={projects.projects} jobs={jobs} selectedProjectId={selectedProjectId} onSelectProject={setSelectedProjectId} onCreateProject={projects.createProject} onRenameProject={projects.renameProject} onSetAspect={projects.setProjectAspect} onDeleteProject={projects.deleteProject} onUpdateClip={projects.updateClip} onRemoveClip={projects.removeClip} onReorderClips={projects.reorderClips} onMoveClip={projects.moveClip} onOpenLibrary={() => setWorkspace("videos")} onRemix={(job) => void remix(job)} />}
+      {workspace === "videos" ? <motion.div key="videos" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}><JobCanvas jobs={visibleJobs} projectMemberships={projectMemberships} autoplayEnabled={autoplayEnabled} favoritePendingIds={favoritePendingIds} replacementTarget={projectReplacementTarget ? { currentJobId: projectReplacementTarget.currentJobId, label: projectReplacementTarget.label, onCancel: cancelClipReplacement } : undefined} onFavorite={requestFavorite} onProjectAction={handleProjectAction} onOpenProject={openProject} onRemix={(job) => void remix(job)} onDelete={remove} onCancel={cancel} /></motion.div> : <Projects key="projects" projects={projects.projects} jobs={jobs} selectedProjectId={selectedProjectId} onSelectProject={setSelectedProjectId} onCreateProject={projects.createProject} onRenameProject={projects.renameProject} onSetAspect={projects.setProjectAspect} onDeleteProject={projects.deleteProject} onUpdateClip={projects.updateClip} onRemoveClip={projects.removeClip} onReorderClips={projects.reorderClips} onMoveClip={projects.moveClip} onOpenLibrary={openLibrary} onReplaceClip={beginClipReplacement} onRemix={(job) => void remix(job)} />}
     </AnimatePresence>
     {workspace === "videos" && <GithubStarPrompt visible={githubStarReminder.visible} onDismiss={githubStarReminder.dismiss} onStar={githubStarReminder.hideForever} />}
     {workspace === "videos" && specError && !specs && <p className="fixed inset-x-4 bottom-20 z-50 text-center text-xs text-red-300">{specError}</p>}

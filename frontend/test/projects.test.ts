@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { clipDuration, clipFractionAtSourceTime, isProjectPlaybackBoundary, makeProjectClip, moveProjectClip, normalizeClip, projectClipFadeDuration, projectClipOpacity, projectClipTrimValue, projectMembershipsByJob, reorderProjectClips, restoreProjects, shouldToggleProjectPlayback, sourceTimeAtClipFraction, timelineEdgeScrollVelocity } from "../src/lib/projects";
+import { clipDuration, clipFractionAtSourceTime, isProjectPlaybackBoundary, makeProjectClip, moveProjectClip, normalizeClip, projectClipFadeDuration, projectClipOpacity, projectClipTrimValue, projectMembershipsByJob, reorderProjectClips, replaceProjectClip, restoreProjects, shouldToggleProjectPlayback, sourceTimeAtClipFraction, timelineEdgeScrollVelocity } from "../src/lib/projects";
 import { resolveProjectPlaybackPosition } from "../src/lib/projectPlayback";
 import type { Job, LocalProject, ProjectClip } from "../src/types";
 
@@ -171,6 +171,42 @@ test("new project clips use canonical H3 output duration", () => {
   assert.equal(projectClip.transitionIn, "fade-black");
   assert.equal("contentUrl" in projectClip, false);
   assert.equal("hearted" in projectClip, false);
+});
+
+test("replacing a project clip resets source trim while preserving sequence edits", () => {
+  const original = {
+    ...clip("replace", 3),
+    inPoint: 1.5,
+    outPoint: 4,
+    playbackRate: 1.5 as const,
+    transitionIn: "cut" as const,
+    createdAt: 42,
+  };
+  const replacementJob = {
+    id: "b".repeat(32),
+    mode: "frames",
+    prompt: "replacement",
+    createdAt: 2,
+    updatedAt: 2,
+    status: "completed",
+    duration: 5,
+    aspect: "16:9",
+    turbo: true,
+    inputAssetIds: [],
+    contentUrl: "/api/replacement-video",
+    metadata: { duration_seconds: 15 },
+  } satisfies Job;
+
+  const replaced = replaceProjectClip(original, replacementJob);
+  assert.equal(replaced.id, original.id);
+  assert.equal(replaced.jobId, replacementJob.id);
+  assert.equal(replaced.inPoint, 0);
+  assert.equal(replaced.outPoint, 15);
+  assert.equal(replaced.sourceDuration, 15);
+  assert.equal(replaced.playbackRate, 1.5);
+  assert.equal(replaced.transitionIn, "cut");
+  assert.equal(replaced.order, 3);
+  assert.equal(replaced.createdAt, 42);
 });
 
 test("project memberships group project chips by referenced job", () => {

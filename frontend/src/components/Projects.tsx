@@ -1,4 +1,4 @@
-import { Blend, ChevronLeft, ChevronRight, Download, Film, GripVertical, LoaderCircle, Plus, RotateCcw, Scissors, Trash2 } from "lucide-react";
+import { Blend, ChevronLeft, ChevronRight, Download, Film, GripVertical, LoaderCircle, Plus, Replace, RotateCcw, Scissors, Trash2 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   forwardRef,
@@ -59,7 +59,7 @@ function wait(milliseconds: number) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
-export function Projects({ projects, jobs, selectedProjectId, onSelectProject, onCreateProject, onRenameProject, onSetAspect, onDeleteProject, onUpdateClip, onRemoveClip, onReorderClips, onMoveClip, onOpenLibrary, onRemix }: {
+export function Projects({ projects, jobs, selectedProjectId, onSelectProject, onCreateProject, onRenameProject, onSetAspect, onDeleteProject, onUpdateClip, onRemoveClip, onReorderClips, onMoveClip, onOpenLibrary, onReplaceClip, onRemix }: {
   projects: LocalProject[];
   jobs: Job[];
   selectedProjectId: string | null;
@@ -73,6 +73,7 @@ export function Projects({ projects, jobs, selectedProjectId, onSelectProject, o
   onReorderClips: (projectId: string, fromId: string, toId: string) => void;
   onMoveClip: (projectId: string, clipId: string, delta: number) => void;
   onOpenLibrary: () => void;
+  onReplaceClip: (projectId: string, clipId: string) => void;
   onRemix: (job: Job) => void;
 }) {
   const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? projects[0] ?? null;
@@ -120,6 +121,7 @@ export function Projects({ projects, jobs, selectedProjectId, onSelectProject, o
               onReorderClips={(fromId, toId) => onReorderClips(selectedProject.id, fromId, toId)}
               onMoveClip={(clipId, delta) => onMoveClip(selectedProject.id, clipId, delta)}
               onOpenLibrary={onOpenLibrary}
+              onReplaceClip={(clipId) => onReplaceClip(selectedProject.id, clipId)}
               onRemix={onRemix}
             />
           ) : (
@@ -133,7 +135,7 @@ export function Projects({ projects, jobs, selectedProjectId, onSelectProject, o
   );
 }
 
-function ProjectEditor({ project, jobs, onRename, onSetAspect, onDelete, onUpdateClip, onRemoveClip, onReorderClips, onMoveClip, onOpenLibrary, onRemix }: {
+function ProjectEditor({ project, jobs, onRename, onSetAspect, onDelete, onUpdateClip, onRemoveClip, onReorderClips, onMoveClip, onOpenLibrary, onReplaceClip, onRemix }: {
   project: LocalProject;
   jobs: Job[];
   onRename: (name: string) => void;
@@ -144,6 +146,7 @@ function ProjectEditor({ project, jobs, onRename, onSetAspect, onDelete, onUpdat
   onReorderClips: (fromId: string, toId: string) => void;
   onMoveClip: (clipId: string, delta: number) => void;
   onOpenLibrary: () => void;
+  onReplaceClip: (clipId: string) => void;
   onRemix: (job: Job) => void;
 }) {
   const orderedClips = useMemo(() => [...project.clips].sort((a, b) => a.order - b.order), [project.clips]);
@@ -294,7 +297,7 @@ function ProjectEditor({ project, jobs, onRename, onSetAspect, onDelete, onUpdat
       <div className="grid min-h-0 flex-1 grid-rows-[minmax(300px,1fr)_auto] lg:grid-cols-[minmax(0,1fr)_260px] lg:grid-rows-[minmax(0,1fr)_auto]">
         <ProjectPreview clips={orderedClips} jobsById={jobsById} selectedClipId={selectedClip?.id ?? null} aspect={project.aspect} seekTarget={seekTarget} restartRequestId={restartRequestId} onSelectClip={selectPreviewClip} onPosition={updatePreviewPosition} onUpdateClip={onUpdateClip} onRemoveClip={onRemoveClip} />
         <AnimatePresence mode="wait">
-          <ClipInspector key={selectedClip?.id ?? "empty"} clip={selectedClip} job={selectedClip ? jobsById.get(selectedClip.jobId) ?? null : null} index={selectedIndex} clipCount={orderedClips.length} onUpdate={onUpdateClip} onRemove={(clipId) => onRemoveClip(clipId)} onMove={onMoveClip} onRemix={onRemix} />
+          <ClipInspector key={selectedClip?.id ?? "empty"} clip={selectedClip} job={selectedClip ? jobsById.get(selectedClip.jobId) ?? null : null} index={selectedIndex} clipCount={orderedClips.length} onUpdate={onUpdateClip} onRemove={(clipId) => onRemoveClip(clipId)} onMove={onMoveClip} onReplace={onReplaceClip} onRemix={onRemix} />
         </AnimatePresence>
         <div data-project-timeline className="border-t border-white/7 lg:col-span-2">
           <div className="flex items-center justify-between px-4 py-2.5 sm:px-5"><span className="text-[9px] font-bold uppercase tracking-[0.16em] text-white/32">Timeline</span><div className="flex items-center gap-3"><button type="button" disabled={!orderedClips.length} onClick={restartTimeline} className="flex items-center gap-1.5 text-[10px] font-semibold text-white/42 hover:text-white disabled:opacity-25" title="Restart playback from the beginning"><RotateCcw size={11} /> Restart</button><button type="button" onClick={onOpenLibrary} className="flex items-center gap-1.5 text-[10px] font-semibold text-reelo-accent hover:text-white"><Plus size={12} /> Add from videos</button></div></div>
@@ -828,7 +831,7 @@ function ClipTrimControl({ clip, onUpdate }: {
   );
 }
 
-function ClipInspector({ clip, job, index, clipCount, onUpdate, onRemove, onMove, onRemix }: {
+function ClipInspector({ clip, job, index, clipCount, onUpdate, onRemove, onMove, onReplace, onRemix }: {
   clip: ProjectClip | null;
   job: Job | null;
   index: number;
@@ -836,6 +839,7 @@ function ClipInspector({ clip, job, index, clipCount, onUpdate, onRemove, onMove
   onUpdate: (clipId: string, patch: Partial<ProjectClip>) => void;
   onRemove: (clipId: string) => void;
   onMove: (clipId: string, delta: number) => void;
+  onReplace: (clipId: string) => void;
   onRemix: (job: Job) => void;
 }) {
   if (!clip) return <motion.aside initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="border-t border-white/7 p-5 text-xs text-white/32 lg:border-l lg:border-t-0">Select a clip to edit it.</motion.aside>;
@@ -850,7 +854,7 @@ function ClipInspector({ clip, job, index, clipCount, onUpdate, onRemove, onMove
           <button type="button" aria-pressed={clip.transitionIn !== "cut"} onClick={() => onUpdate(clip.id, { transitionIn: "fade-black" })} className={`flex items-center justify-center gap-1.5 rounded-md py-1.5 text-[9px] font-bold transition-colors ${clip.transitionIn !== "cut" ? "bg-reelo-accent text-black" : "text-white/38 hover:bg-white/[.055] hover:text-white/70"}`}><Blend size={11} /> Fade · 0.3s</button>
         </div></div>}
       </div>
-      <div className="mt-6 flex gap-2"><button type="button" disabled={!job} onClick={() => job && onRemix(job)} className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-white/[.055] px-3 py-2 text-[10px] font-semibold text-white/68 hover:bg-white/10 hover:text-white disabled:opacity-35"><RemixIcon size={12} /> Remix</button><button type="button" onClick={() => onUpdate(clip.id, { inPoint: 0, outPoint: clip.sourceDuration, playbackRate: 1 })} className="flex size-8 items-center justify-center rounded-lg bg-white/[.055] text-white/50 hover:bg-white/10 hover:text-white" title="Reset edits"><RotateCcw size={12} /></button><button type="button" onClick={() => onRemove(clip.id)} className="flex size-8 items-center justify-center rounded-lg bg-white/[.055] text-white/45 hover:bg-red-500/15 hover:text-red-300" title="Remove from project"><Trash2 size={12} /></button></div>
+      <div className="mt-6 flex gap-2"><button type="button" disabled={!job} onClick={() => job && onRemix(job)} className="flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg bg-white/[.055] px-2 py-2 text-[10px] font-semibold text-white/68 hover:bg-white/10 hover:text-white disabled:opacity-35"><RemixIcon size={12} /> Remix</button><button type="button" onClick={() => onReplace(clip.id)} className="flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg bg-white/[.055] px-2 py-2 text-[10px] font-semibold text-white/68 hover:bg-reelo-accent/15 hover:text-reelo-accent"><Replace size={12} /> Replace</button><button type="button" onClick={() => onUpdate(clip.id, { inPoint: 0, outPoint: clip.sourceDuration, playbackRate: 1 })} className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-white/[.055] text-white/50 hover:bg-white/10 hover:text-white" title="Reset edits"><RotateCcw size={12} /></button><button type="button" onClick={() => onRemove(clip.id)} className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-white/[.055] text-white/45 hover:bg-red-500/15 hover:text-red-300" title="Remove from project"><Trash2 size={12} /></button></div>
     </motion.aside>
   );
 }

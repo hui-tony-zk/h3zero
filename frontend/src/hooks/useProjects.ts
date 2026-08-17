@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { makeProject, makeProjectClip, moveProjectClip, normalizeClip, reorderProjectClips } from "../lib/projects";
+import { makeProject, makeProjectClip, moveProjectClip, normalizeClip, reorderProjectClips, replaceProjectClip } from "../lib/projects";
 import { readProjects, writeProjects } from "../lib/storage/projectRepository";
 import type { AspectId, Job, LocalProject, ProjectClip } from "../types";
 
@@ -45,6 +45,13 @@ export function useProjects() {
     }));
   }, [updateProject]);
 
+  const replaceClip = useCallback((projectId: string, clipId: string, job: Job) => {
+    updateProject(projectId, (project) => ({
+      ...project,
+      clips: project.clips.map((clip) => clip.id === clipId && clip.jobId !== job.id ? replaceProjectClip(clip, job) : clip),
+    }));
+  }, [updateProject]);
+
   const removeClip = useCallback((projectId: string, clipId: string) => {
     updateProject(projectId, (project) => ({
       ...project,
@@ -64,6 +71,6 @@ export function useProjects() {
 
   return {
     projects, createProject, renameProject, setProjectAspect, deleteProject,
-    addJob, updateClip, removeClip, reorderClips, moveClip, referencedJobIds,
+    addJob, updateClip, replaceClip, removeClip, reorderClips, moveClip, referencedJobIds,
   };
 }

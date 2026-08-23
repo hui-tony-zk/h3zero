@@ -31,10 +31,10 @@ class ModalServiceDefinitionTests(unittest.TestCase):
         self.assertIn("await deployWebApp(python);", deploy_body)
         self.assertNotIn("deployGpuApp", deploy_body)
 
-    def test_turbo_dependencies_are_revision_pinned(self):
+    def test_gpu_dependencies_are_revision_pinned(self):
         source = Path("modal_services/h3_gpu.py").read_text(encoding="utf-8")
         self.assertIn(
-            'COMFY_COMMIT = "43cb4fffc89bba20ab7bd61467a36d0339338dab"',
+            'COMFY_COMMIT = "2f35f4a08176d993cded35dac3332be4f7287f41"',
             source,
         )
         self.assertNotIn("ComfyUI-MiniMax-H3-Turbo", source)
@@ -44,10 +44,11 @@ class ModalServiceDefinitionTests(unittest.TestCase):
         )
         self.assertIn('TURBO_REPO = "lightx2v/Minimax-h3-Turbo"', source)
         self.assertIn(
-            'SPECTRUM_COMMIT = "4b9a7d1163348c67e7e475423f24f8b7abb23565"',
+            'SPECTRUM_COMMIT = "567768f0de500ffbaf404dd9527c7a537819f7cd"',
             source,
         )
         self.assertIn("ComfyUI-Spectrum-MiniMax-H3", source)
+        self.assertNotIn("SageAttention", source)
         self.assertIn('"loras",', source)
 
     def test_h3_uses_cpu_memory_snapshot_lifecycle(self):

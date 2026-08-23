@@ -37,15 +37,15 @@ test("reused reference labels submit as H3 picture tags", () => {
 test("turning Turbo off selects Spectrum", () => {
   const body = buildCreateJobRequest({ mode: "frames", prompt: "move", promptDocument: emptyPromptDocument(), duration: 5, aspect: "16:9", generationCount: 1, turbo: false, firstFrame: null, lastFrame: null }, specs);
   const config = JSON.parse(String(body.get("config")));
-  assert.deepEqual({ profile: config.sampling_profile, turbo: config.turbo, seed: config.seed, resolution: config.resolution, steps: config.steps, sampler: config.sampler, scheduler: config.scheduler }, { profile: "spectrum", turbo: false, seed: null, resolution: "480p", steps: 20, sampler: "res_multistep", scheduler: "simple" });
+  assert.deepEqual({ profile: config.sampling_profile, turbo: config.turbo, seed: config.seed, resolution: config.resolution, steps: config.steps, sampler: config.sampler, scheduler: config.scheduler }, { profile: "spectrum", turbo: false, seed: null, resolution: "480p", steps: 30, sampler: "res_multistep", scheduler: "simple" });
 });
 
 test("all profile choices retain random-seed 480p production settings", () => {
   for (const [draft, profile, steps, turbo] of [
     [{ mode: "frames", prompt: "compare", promptDocument: emptyPromptDocument(), duration: 5, aspect: "16:9", generationCount: 1, samplingProfile: "turbo_4", seed: 42, resolution: "768p", firstFrame: null, lastFrame: null }, "turbo_4", 4, true],
     [{ mode: "frames", prompt: "compare", promptDocument: emptyPromptDocument(), duration: 5, aspect: "16:9", generationCount: 1, samplingProfile: "turbo_8", seed: 42, resolution: "768p", firstFrame: null, lastFrame: null }, "turbo_8", 8, true],
-    [{ mode: "frames", prompt: "compare", promptDocument: emptyPromptDocument(), duration: 5, aspect: "16:9", generationCount: 1, samplingProfile: "spectrum", seed: 106, resolution: "768p", firstFrame: null, lastFrame: null }, "spectrum", 20, false],
-    [{ mode: "frames", prompt: "compare", promptDocument: emptyPromptDocument(), duration: 5, aspect: "16:9", generationCount: 1, samplingProfile: "base", seed: 99, resolution: "768p", firstFrame: asset("frame"), lastFrame: null }, "base", 20, false],
+    [{ mode: "frames", prompt: "compare", promptDocument: emptyPromptDocument(), duration: 5, aspect: "16:9", generationCount: 1, samplingProfile: "spectrum", seed: 106, resolution: "768p", firstFrame: null, lastFrame: null }, "spectrum", 30, false],
+    [{ mode: "frames", prompt: "compare", promptDocument: emptyPromptDocument(), duration: 5, aspect: "16:9", generationCount: 1, samplingProfile: "base", seed: 99, resolution: "768p", firstFrame: asset("frame"), lastFrame: null }, "base", 30, false],
   ] as const) {
     const config = JSON.parse(String(buildCreateJobRequest(draft, specs).get("config")));
     assert.equal(config.sampling_profile, profile);

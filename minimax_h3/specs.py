@@ -6,19 +6,21 @@ import copy
 import math
 
 from minimax_h3.loras import public_loras
+from minimax_h3.runtime import ATTENTION_BACKEND, COMFY_KITCHEN_VERSION
 
 FPS = 24
 CANVAS_MULTIPLE = 32
 BASE_SHORT_EDGE = 480
 MAX_PIXELS = 768 * 1344
-SPEC_VERSION = "1.6"
-BASE_MIN_STEPS = 20
-BASE_STEPS = 20
-BASE_MAX_STEPS = 20
+SPEC_VERSION = "1.7"
+BASE_MIN_STEPS = 30
+BASE_STEPS = 30
+BASE_MAX_STEPS = 30
 BASE_SAMPLER = "res_multistep"
 BASE_SCHEDULER = "simple"
 TURBO_4_LORA = "minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors"
 TURBO_8_LORA = "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors"
+SPECTRUM_VERSION = "0.2.16"
 TURBO_LORA = TURBO_4_LORA
 TURBO_LORA_STRENGTH = 1.0
 TURBO_MIN_STEPS = 4
@@ -61,11 +63,11 @@ SAMPLING_PROFILES = {
         "low_vram": None,
     },
     "spectrum": {
-        "label": "Spectrum · 20 steps",
-        "method": "MiniMax-H3 Base with Spectrum v0.2.5",
+        "label": "Spectrum · 30 steps",
+        "method": f"MiniMax-H3 Base with Spectrum v{SPECTRUM_VERSION}",
         "lora": None,
         "preview": True,
-        "steps": {"default": 20, "min": 20, "max": 20},
+        "steps": {"default": BASE_STEPS, "min": BASE_MIN_STEPS, "max": BASE_MAX_STEPS},
         "sampler": "res_multistep",
         "scheduler": "simple",
         "lora_strength": None,
@@ -74,11 +76,11 @@ SAMPLING_PROFILES = {
         "low_vram": None,
     },
     "base": {
-        "label": "Base 20 steps",
+        "label": "Base · 30 steps",
         "method": "MiniMax-H3 Base",
         "lora": None,
         "preview": False,
-        "steps": {"default": 20, "min": 20, "max": 20},
+        "steps": {"default": BASE_STEPS, "min": BASE_MIN_STEPS, "max": BASE_MAX_STEPS},
         "sampler": "res_multistep",
         "scheduler": "simple",
         "lora_strength": None,
@@ -284,6 +286,11 @@ _SPECS = {
     },
     "output": {
         "fps": FPS,
+        "attention": {
+            "backend": ATTENTION_BACKEND,
+            "version": COMFY_KITCHEN_VERSION,
+            "scope": "global",
+        },
         "loras": public_loras(),
         "sampling": {
             "default": DEFAULT_SAMPLING_PROFILE,

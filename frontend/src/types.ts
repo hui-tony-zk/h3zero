@@ -113,12 +113,13 @@ export interface SamplingProfile {
 }
 
 export interface H3Specs {
-  version: "1.6";
+  version: "1.7";
   modes: {
     frames: FramesModeSpec;
     references: ReferencesModeSpec;
   };
   output: {
+    attention: { backend: "comfy_kitchen"; version: string; scope: "global" };
     loras: LoraConfig[];
     sampling: {
       default: SamplingProfileId;
@@ -170,6 +171,7 @@ export interface GenerationMetadata {
   lora?: string;
   lora_strength?: number;
   lora_low_vram?: boolean;
+  attention?: { backend: string; version: string };
   spectrum?: { version: string; offline_smoothing_replay: boolean; audio_blend_weight: number };
   loras?: Array<{ id: string; name: string; filename: string; strength: number }>;
   audio?: { native: boolean; sample_rate_hz: number; channels: number };

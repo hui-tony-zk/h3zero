@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from importlib.metadata import version
 
 PYTORCH_VERSION = "2.11.0+cu130"
 TORCHVISION_VERSION = "0.26.0+cu130"
@@ -11,8 +12,8 @@ PYTORCH_CUDA_INDEX = "https://download.pytorch.org/whl/cu130"
 EXPECTED_CUDA_VERSION = (13, 0)
 EXPECTED_GPU_CAPABILITY = (12, 0)
 
-SAGE_ATTENTION_VERSION = "2.2.0"
-SAGE_ATTENTION_COMMIT = "d1a57a546c3d395b1ffcbeecc66d81db76f3b4b5"
+ATTENTION_BACKEND = "comfy_kitchen"
+COMFY_KITCHEN_VERSION = "0.2.31"
 
 
 def _version_pair(raw: str | None) -> tuple[int, int] | None:
@@ -55,7 +56,7 @@ def cuda_compatibility_error(
 
 
 def verify_gpu_runtime() -> dict:
-    """Probe CUDA and SageAttention before the large H3 models are loaded."""
+    """Probe CUDA and Comfy Kitchen before the large H3 models are loaded."""
     import torch
 
     if not torch.cuda.is_available():
@@ -70,16 +71,23 @@ def verify_gpu_runtime() -> dict:
         raise RuntimeError(error)
 
     try:
-        from sageattention import sageattn
+        import comfy_kitchen
 
+        installed_version = version("comfy-kitchen")
+        if installed_version != COMFY_KITCHEN_VERSION:
+            raise RuntimeError(
+                f"expected comfy-kitchen {COMFY_KITCHEN_VERSION}, got {installed_version}"
+            )
+        if not comfy_kitchen.int8_attention_is_available():
+            raise RuntimeError("the INT8 attention kernel is unavailable")
         q = torch.zeros((1, 2, 128, 64), device="cuda", dtype=torch.bfloat16)
-        result = sageattn(q, q, q, tensor_layout="HND", is_causal=False)
+        result = comfy_kitchen.int8_attention(q, q, q)
         if result.shape != q.shape:
             raise RuntimeError(f"unexpected output shape {tuple(result.shape)}")
         torch.cuda.synchronize()
     except Exception as exc:
         raise RuntimeError(
-            "The pinned SageAttention 2 CUDA kernel failed its startup probe: "
+            "The pinned Comfy Kitchen INT8 attention kernel failed its startup probe: "
             f"{exc}"
         ) from exc
 
@@ -88,5 +96,5 @@ def verify_gpu_runtime() -> dict:
         "cuda": torch.version.cuda,
         "gpu": torch.cuda.get_device_name(),
         "capability": f"sm_{capability[0]}{capability[1]}",
-        "attention": f"sageattention-{SAGE_ATTENTION_VERSION}",
+        "attention": f"comfy-kitchen-{COMFY_KITCHEN_VERSION}",
     }

@@ -118,6 +118,7 @@ test("generation settings expose resolved metadata with the prompt last", () => 
       steps: 4, sampler: "res_multistep", scheduler: "simple", turbo: true,
       sampling_profile: "turbo_4", resolution: "768p",
       lora: "turbo.safetensors", lora_strength: 1,
+      attention: { backend: "comfy_kitchen", version: "0.2.31" },
       audio: { native: true, sample_rate_hz: 32000, channels: 2 },
     },
   } as Job;
@@ -126,6 +127,7 @@ test("generation settings expose resolved metadata with the prompt last", () => 
   assert.equal(flat.find((entry) => entry.label === "Seed")?.value, "987654");
   assert.equal(flat.find((entry) => entry.label === "Output size")?.value, "768 × 1344");
   assert.equal(flat.find((entry) => entry.label === "Generation time")?.value, "1m 2s · sampling → video ready");
+  assert.equal(flat.find((entry) => entry.label === "Attention")?.value, "Comfy Kitchen · v0.2.31");
   assert.equal(sections.at(-1)?.title, "Prompt");
   assert.equal(sections.at(-1)?.text, job.prompt);
   const withoutStart = generationSettingSections({ ...job, samplingStartedAt: undefined });

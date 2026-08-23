@@ -113,12 +113,13 @@ class ComfyStartupTests(unittest.TestCase):
         socket.close.assert_called_once_with()
 
     @patch("minimax_h3.comfy.subprocess.Popen")
-    def test_starts_without_highvram_and_with_sage_attention(self, popen):
+    def test_starts_without_highvram_and_with_comfy_kitchen_attention(self, popen):
         start_comfyui(8199)
 
         command = popen.call_args.args[0]
         self.assertNotIn("--highvram", command)
-        self.assertIn("--use-sage-attention", command)
+        self.assertIn("--use-ck-attention", command)
+        self.assertNotIn("--use-sage-attention", command)
         self.assertEqual(popen.call_args.kwargs["cwd"], COMFY_DIR)
 
 

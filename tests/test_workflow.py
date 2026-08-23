@@ -106,7 +106,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(spectrum["spectrum"]["class_type"], "SpectrumApplyMiniMaxH3")
         self.assertTrue(spectrum["spectrum"]["inputs"]["offline_smoothing_replay"])
         self.assertEqual(spectrum["spectrum"]["inputs"]["audio_blend_weight"], 0.0)
-        self.assertEqual(spectrum["scheduler"]["inputs"]["steps"], 20)
+        self.assertEqual(spectrum["spectrum"]["inputs"]["model_aware_mode"], "off")
+        self.assertEqual(spectrum["scheduler"]["inputs"]["steps"], 30)
         self.assertEqual(spectrum["scheduler"]["inputs"]["model"], ["spectrum", 0])
 
     def test_rejects_oversized_canvas(self):
@@ -204,15 +205,24 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(workflow["turbo_lora"]["class_type"], "LoraLoaderModelOnly")
         self.assertEqual(workflow["sampler"]["class_type"], "KSamplerSelect")
 
-    def test_rejects_non_turbo_sampling_settings(self):
-        with self.assertRaisesRegex(ValueError, "steps must be 4"):
+    def test_accepts_custom_positive_step_counts_for_future_frontend_tuning(self):
+        workflow = build_frames_workflow(
+            prompt="Custom step count",
+            width=864,
+            height=480,
+            duration_seconds=5,
+            seed=1,
+            steps=3,
+        )
+        self.assertEqual(workflow["scheduler"]["inputs"]["steps"], 3)
+        with self.assertRaisesRegex(ValueError, "steps must be a positive integer"):
             build_frames_workflow(
-                prompt="Too few steps",
+                prompt="Invalid step count",
                 width=864,
                 height=480,
                 duration_seconds=5,
                 seed=1,
-                steps=3,
+                steps=0,
             )
         with self.assertRaisesRegex(ValueError, "res_multistep"):
             build_frames_workflow(
@@ -238,7 +248,7 @@ class WorkflowTests(unittest.TestCase):
             "class_type": "KSamplerSelect",
             "inputs": {"sampler_name": "res_multistep"},
         })
-        self.assertEqual(workflow["scheduler"]["inputs"]["steps"], 20)
+        self.assertEqual(workflow["scheduler"]["inputs"]["steps"], 30)
         self.assertEqual(workflow["scheduler"]["inputs"]["model"], ["spectrum", 0])
         self.assertEqual(workflow["guider"]["inputs"]["model"], ["spectrum", 0])
 

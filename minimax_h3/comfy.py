@@ -46,7 +46,7 @@ def start_comfyui(port: int = DEFAULT_PORT) -> subprocess.Popen:
             "127.0.0.1",
             "--disable-auto-launch",
             "--disable-metadata",
-            "--use-sage-attention",
+            "--use-ck-attention",
         ],
         cwd=COMFY_DIR,
     )

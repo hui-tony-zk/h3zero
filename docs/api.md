@@ -5,10 +5,11 @@ The endpoint is public and does not require a Modal or Hugging Face API key.
 Polling, static files, and video downloads are CPU-only.
 
 Both generation modes expose the same four sampling profiles: LightX2V Turbo
-at four or eight `res_multistep` / `simple` steps, Spectrum at 20 steps, and
-Base at 20 steps. H3Zero submits every profile at 480p with a random seed and
+at four or eight `res_multistep` / `simple` steps, Spectrum at 30 steps, and
+Base at 30 steps. H3Zero submits every profile at 480p with a random seed and
 does not expose resolution or seed controls. `/api/specs` reports the pinned
-files and exact settings.
+files and exact settings. Comfy Kitchen INT8 attention is the global attention
+backend; Spectrum adds transformer forecasting only to the `spectrum` profile.
 
 Copy the URL printed beside `web =>` after `npm run setup`, then set it for the
 curl examples in your current terminal:
@@ -51,6 +52,8 @@ PNG, JPEG, or WebP files up to 20 MiB.
 Set `sampling_profile` to `turbo_4`, `turbo_8`, `spectrum`, or `base`. It
 defaults to `turbo_4`. The production composer always uses a random seed and a
 480p canvas; native 16:9 output is 864×480 and portrait output is 480×864.
+The API accepts any positive integer `steps` value; profile defaults are UI
+choices rather than worker-side restrictions.
 
 ```bash
 curl -X POST "$H3_MODAL_URL/api/jobs" \
@@ -113,7 +116,8 @@ sampling phase.
 A completed result includes dimensions, frames, actual duration, FPS, audio
 metadata, seed, the selected sampling profile and settings, assigned reference
 tags, and `video_url`. LoRA fields are present only for Turbo generations;
-Spectrum generations include their Spectrum settings.
+Every completed generation reports its Comfy Kitchen attention version.
+Spectrum generations additionally include their Spectrum settings.
 
 Completed job videos are delivery artifacts, not permanent server storage. The
 H3Zero browser caches the MP4 in IndexedDB and then acknowledges the job so its

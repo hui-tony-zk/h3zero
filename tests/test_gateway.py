@@ -507,7 +507,7 @@ class GatewayTests(unittest.TestCase):
         base = parse_config("test", '{"turbo": false}')
         self.assertEqual(
             (base["sampling_profile"], base["steps"], base["sampler"], base["scheduler"]),
-            ("spectrum", 20, "res_multistep", "simple"),
+            ("spectrum", 30, "res_multistep", "simple"),
         )
         turbo_8 = parse_config("test", '{"sampling_profile":"turbo_8","seed":42}')
         self.assertEqual(
@@ -517,7 +517,7 @@ class GatewayTests(unittest.TestCase):
         spectrum = parse_config("test", '{"sampling_profile":"spectrum","seed":106}')
         self.assertEqual(
             (spectrum["turbo"], spectrum["steps"], spectrum["seed"]),
-            (False, 20, 106),
+            (False, 30, 106),
         )
         high_resolution = parse_config(
             "test",

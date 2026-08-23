@@ -6,7 +6,7 @@ from minimax_h3.specs import get_specs, native_canvas
 class SpecsTests(unittest.TestCase):
     def test_authoritative_capabilities_snapshot(self):
         specs = get_specs()
-        self.assertEqual(specs["version"], "1.6")
+        self.assertEqual(specs["version"], "1.7")
         self.assertTrue(specs["modes"]["references"]["available"])
         self.assertEqual(
             specs["modes"]["references"]["model"],
@@ -33,7 +33,7 @@ class SpecsTests(unittest.TestCase):
         turbo = sampling["profiles"]["turbo_4"]
         spectrum = sampling["profiles"]["spectrum"]
         self.assertEqual(sampling["profiles"]["turbo_8"]["steps"]["default"], 8)
-        self.assertEqual(sampling["profiles"]["base"]["steps"]["default"], 20)
+        self.assertEqual(sampling["profiles"]["base"]["steps"]["default"], 30)
         self.assertEqual(turbo["steps"], {"default": 4, "min": 4, "max": 4})
         self.assertEqual(turbo["sampler"], "res_multistep")
         self.assertEqual(
@@ -43,7 +43,12 @@ class SpecsTests(unittest.TestCase):
         self.assertEqual(turbo["lora_strength"], 1.0)
         self.assertIsNone(turbo["low_vram"])
         self.assertTrue(spectrum["spectrum"])
-        self.assertEqual(spectrum["steps"], {"default": 20, "min": 20, "max": 20})
+        self.assertEqual(spectrum["method"], "MiniMax-H3 Base with Spectrum v0.2.16")
+        self.assertEqual(spectrum["steps"], {"default": 30, "min": 30, "max": 30})
+        self.assertEqual(
+            specs["output"]["attention"],
+            {"backend": "comfy_kitchen", "version": "0.2.31", "scope": "global"},
+        )
         self.assertEqual(
             specs["output"]["seed"]["options"],
             [

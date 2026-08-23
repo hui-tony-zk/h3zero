@@ -20,15 +20,17 @@ from minimax_h3 import hf
 from minimax_h3.loras import active_loras, download_specs, resolve_lora_strengths
 from minimax_h3.progress import progress_from_comfy_event
 from minimax_h3.specs import (
+    SPECTRUM_VERSION,
     TURBO_4_LORA,
     TURBO_8_LORA,
     TURBO_LORA_STRENGTH,
     resolve_sampling_profile,
 )
 from minimax_h3.runtime import (
+    ATTENTION_BACKEND,
+    COMFY_KITCHEN_VERSION,
     PYTORCH_CUDA_INDEX,
     PYTORCH_VERSION,
-    SAGE_ATTENTION_COMMIT,
     TORCHAUDIO_VERSION,
     TORCHVISION_VERSION,
     verify_gpu_runtime,
@@ -54,12 +56,12 @@ from minimax_h3.workflow import (
 )
 from modal_services import jobs
 
-COMFY_COMMIT = "43cb4fffc89bba20ab7bd61467a36d0339338dab"
+COMFY_COMMIT = "2f35f4a08176d993cded35dac3332be4f7287f41"
 MODEL_REVISION = "cfc0a7e86b7bfd99199db90a536ab187af61a8b9"
 MODEL_REPO = "Comfy-Org/MiniMax-H3"
 TURBO_REVISION = "e6346777701aa2b64d42ed058cdd71ae00e7cd52"
 TURBO_REPO = "lightx2v/Minimax-h3-Turbo"
-SPECTRUM_COMMIT = "4b9a7d1163348c67e7e475423f24f8b7abb23565"
+SPECTRUM_COMMIT = "567768f0de500ffbaf404dd9527c7a537819f7cd"
 SPECTRUM_REPO = "https://github.com/xmarre/ComfyUI-Spectrum-MiniMax-H3.git"
 
 MODEL_DOWNLOADS = [
@@ -138,10 +140,6 @@ comfy_image = (
         "ffmpeg",
         "libgl1",
         "libglib2.0-0",
-        # SageAttention is a CUDA extension. Use the GNU toolchain that the
-        # pinned PyTorch wheels were built with, plus Ninja for reliable builds.
-        "build-essential",
-        "ninja-build",
     )
     .pip_install("comfy-cli==1.13.0")
     .run_commands("comfy --skip-prompt install --fast-deps --nvidia")
@@ -165,21 +163,10 @@ comfy_image = (
         f"torchaudio=={TORCHAUDIO_VERSION}",
         index_url=PYTORCH_CUDA_INDEX,
     )
-    .run_commands(
-        "python -m pip install --no-build-isolation "
-        f"git+https://github.com/thu-ml/SageAttention.git@{SAGE_ATTENTION_COMMIT}",
-        env={
-            "CC": "gcc",
-            "CXX": "g++",
-            "TORCH_CUDA_ARCH_LIST": "12.0",
-            "EXT_PARALLEL": "4",
-            "MAX_JOBS": "16",
-        },
-    )
     .pip_install("websocket-client==1.9.0")
     .env({
-        # Reelo's proven Blackwell setup keeps runtime JIT compilation
-        # single-threaded to avoid unstable parallel compiler workers.
+        # Keep Blackwell runtime JIT compilation single-threaded to avoid
+        # unstable parallel compiler workers.
         "TORCHINDUCTOR_COMPILE_THREADS": "1",
     })
     .add_local_file(
@@ -530,6 +517,10 @@ class H3Service:
                 "steps": sampling_steps,
                 "sampler": sampling_sampler,
                 "scheduler": workflow["scheduler"]["inputs"]["scheduler"],
+                "attention": {
+                    "backend": ATTENTION_BACKEND,
+                    "version": COMFY_KITCHEN_VERSION,
+                },
                 "audio": {"native": True, "sample_rate_hz": 32000, "channels": 2},
             }
             if profile["lora"]:
@@ -539,7 +530,7 @@ class H3Service:
                 })
             if profile["spectrum"]:
                 metadata["spectrum"] = {
-                    "version": "0.2.5",
+                    "version": SPECTRUM_VERSION,
                     "offline_smoothing_replay": True,
                     "audio_blend_weight": 0.0,
                 }

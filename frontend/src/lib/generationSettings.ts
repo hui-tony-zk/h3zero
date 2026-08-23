@@ -7,8 +7,8 @@ export type GenerationSettingSection = { title: string; items: GenerationSetting
 const profileSteps: Record<SamplingProfileId, number> = {
   turbo_4: 4,
   turbo_8: 8,
-  spectrum: 20,
-  base: 20,
+  spectrum: 30,
+  base: 30,
 };
 
 function present(value: unknown): value is string | number {
@@ -96,6 +96,7 @@ export function generationSettingSections(job: Job): GenerationSettingSection[] 
   ];
 
   const acceleration: GenerationSetting[] = [
+    ...item("Attention", metadata?.attention ? `Comfy Kitchen · v${metadata.attention.version}` : undefined),
     ...item("Turbo LoRA", metadata?.lora),
     ...item("Turbo LoRA strength", metadata?.lora_strength),
     ...item("Spectrum", metadata?.spectrum ? `v${metadata.spectrum.version}` : undefined),

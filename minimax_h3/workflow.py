@@ -59,14 +59,10 @@ def validate_generation(
         raise ValueError(
             f"width * height must not exceed {max_pixels} pixels for {resolution_id}"
         )
-    min_steps = profile["steps"]["min"]
-    max_steps = profile["steps"]["max"]
     valid_sampler = profile["sampler"]
     valid_scheduler = profile["scheduler"]
-    if not min_steps <= steps <= max_steps:
-        if min_steps == max_steps:
-            raise ValueError(f"steps must be {min_steps}")
-        raise ValueError(f"steps must be between {min_steps} and {max_steps}")
+    if isinstance(steps, bool) or not isinstance(steps, int) or steps < 1:
+        raise ValueError("steps must be a positive integer")
     if sampler != valid_sampler:
         raise ValueError(f"sampler must be {valid_sampler!r} for {profile_id}")
     if scheduler != valid_scheduler:
@@ -145,6 +141,7 @@ def _common_workflow(
                 "offline_smoothing_replay": True,
                 "audio_blend_weight": 0.0,
                 "offline_archive_storage": "system_ram",
+                "model_aware_mode": "off",
             },
         }
         model_reference = ["spectrum", 0]

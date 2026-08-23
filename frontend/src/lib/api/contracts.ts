@@ -46,11 +46,12 @@ function metadata(value: unknown): GenerationMetadata | undefined {
 
 export function parseSpecs(value: unknown): H3Specs {
   const source = record(value);
-  if (source.version !== "1.6") throw new Error(`Unsupported H3 spec version: ${String(source.version)}`);
+  if (source.version !== "1.7") throw new Error(`Unsupported H3 spec version: ${String(source.version)}`);
   const modes = record(source.modes);
   record(modes.frames);
   record(modes.references);
   const output = record(source.output);
+  record(output.attention);
   if (output.loras === undefined) output.loras = [];
   if (!Array.isArray(output.loras)) throw new Error("The H3 API returned an invalid LoRA catalog.");
   const sampling = record(output.sampling);

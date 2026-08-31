@@ -2,12 +2,12 @@ import { useEffect, useState } from "react";
 import { loadGeneratedVideoUrl } from "../lib/generatedVideos";
 import type { Job } from "../types";
 
-export function useGeneratedVideoUrl(job: Job) {
+export function useGeneratedVideoUrl(job: Job, enabled = true) {
   const isLocal = job.contentUrl.startsWith("blob:");
-  const [resolvedUrl, setResolvedUrl] = useState<string | null>(isLocal ? job.contentUrl : null);
+  const [resolvedUrl, setResolvedUrl] = useState<string | null>(enabled && isLocal ? job.contentUrl : null);
 
   useEffect(() => {
-    if (job.status !== "completed" || !job.contentUrl) {
+    if (!enabled || job.status !== "completed" || !job.contentUrl) {
       setResolvedUrl(null);
       return;
     }
@@ -26,7 +26,7 @@ export function useGeneratedVideoUrl(job: Job) {
         if (active) setResolvedUrl(job.contentUrl);
       });
     return () => { active = false; };
-  }, [job.contentUrl, job.id, job.status]);
+  }, [enabled, job.contentUrl, job.id, job.status]);
 
-  return isLocal ? job.contentUrl : resolvedUrl;
+  return enabled && isLocal ? job.contentUrl : resolvedUrl;
 }

@@ -1,6 +1,6 @@
 import { AlertCircle, ArrowDownToLine, Film, Heart, LoaderCircle, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
-import { useCallback, useEffect, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { groupJobs } from "../lib/jobs";
 import { profileLabel } from "../lib/sampling";
 import { useGeneratedVideoUrl } from "../hooks/useGeneratedVideoUrl";
@@ -37,8 +37,8 @@ function showVideoThumbnail(video: HTMLVideoElement) {
   if (video.readyState >= 1) video.currentTime = 0;
 }
 
-function JobVideo({ job, autoplayEnabled, onPlaybackReady }: { job: Job; autoplayEnabled: boolean; onPlaybackReady: PlaybackReady }) {
-  const videoUrl = useGeneratedVideoUrl(job);
+function JobVideo({ job, enabled, autoplayEnabled, onPlaybackReady }: { job: Job; enabled: boolean; autoplayEnabled: boolean; onPlaybackReady: PlaybackReady }) {
+  const videoUrl = useGeneratedVideoUrl(job, enabled);
   const isLocal = videoUrl?.startsWith("blob:") === true;
   return videoUrl ? <video data-h3-autoplay-video src={videoUrl} autoPlay={autoplayEnabled} loop muted playsInline preload={autoplayEnabled || isLocal ? "auto" : "metadata"} onLoadedMetadata={(event) => onPlaybackReady(event.currentTarget)} className="absolute inset-0 size-full bg-black object-contain" /> : null;
 }
@@ -76,6 +76,8 @@ function JobCard({ job, autoplayEnabled, onPlaybackReady, favoritePending, onFav
   onView: () => void;
   onSettings: () => void;
 }) {
+  const cardRef = useRef<HTMLElement>(null);
+  const [hasEnteredView, setHasEnteredView] = useState(false);
   const active = isActive(job);
   const failed = job.status === "failed" || job.status === "expired" || job.status === "cancelled";
   const progress = job.progress?.percent;
@@ -89,8 +91,26 @@ function JobCard({ job, autoplayEnabled, onPlaybackReady, favoritePending, onFav
     width: "min(82vw, calc(min(52dvh, 560px) * var(--job-aspect)))",
   } as CSSProperties;
 
+  useEffect(() => {
+    if (hasEnteredView || job.status !== "completed" || !job.contentUrl) return;
+    const card = cardRef.current;
+    if (!card || typeof IntersectionObserver === "undefined") {
+      setHasEnteredView(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(([entry]) => {
+      if (!entry?.isIntersecting) return;
+      setHasEnteredView(true);
+      observer.disconnect();
+    });
+    observer.observe(card);
+    return () => observer.disconnect();
+  }, [hasEnteredView, job.contentUrl, job.status]);
+
   return (
     <motion.article
+      ref={cardRef}
       layout
       data-job-id={job.id}
       initial={{ opacity: 0, y: 12 }}
@@ -101,7 +121,7 @@ function JobCard({ job, autoplayEnabled, onPlaybackReady, favoritePending, onFav
       style={style}
     >
       {job.status === "completed" && job.contentUrl ? (
-        <button type="button" onClick={(event) => { event.stopPropagation(); onView(); }} className="absolute inset-0 size-full cursor-zoom-in" aria-label="Open video fullscreen"><JobVideo job={job} autoplayEnabled={autoplayEnabled} onPlaybackReady={onPlaybackReady} /></button>
+        <button type="button" onClick={(event) => { event.stopPropagation(); onView(); }} className="absolute inset-0 size-full cursor-zoom-in" aria-label="Open video fullscreen"><JobVideo job={job} enabled={hasEnteredView} autoplayEnabled={autoplayEnabled} onPlaybackReady={onPlaybackReady} /></button>
       ) : (
         <div className="absolute inset-0 flex items-center justify-center overflow-hidden bg-[#151515]">
           <div className="absolute inset-0 opacity-70 [background:radial-gradient(circle_at_20%_10%,rgba(68,170,255,.17),transparent_42%),linear-gradient(145deg,rgba(255,255,255,.025),transparent)]" />

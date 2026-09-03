@@ -99,6 +99,18 @@ def normalize_loras(
             raise ValueError(f"duplicate LoRA id: {lora_id}")
         seen.add(lora_id)
 
+        raw_aliases = raw.get("aliases", ())
+        if not isinstance(raw_aliases, (list, tuple)):
+            raise ValueError(f"LoRA {lora_id} aliases must be a list or tuple")
+        aliases = []
+        for alias in raw_aliases:
+            if not isinstance(alias, str) or not LORA_ID.fullmatch(alias):
+                raise ValueError(f"LoRA {lora_id} has an invalid alias")
+            if alias in seen:
+                raise ValueError(f"duplicate LoRA id or alias: {alias}")
+            seen.add(alias)
+            aliases.append(alias)
+
         strings = {}
         for field in ("name", "repo", "source", "filename", "revision"):
             value = raw.get(field)
@@ -138,6 +150,7 @@ def normalize_loras(
             "step": step,
             "prompt": prompt.strip() if isinstance(prompt, str) else None,
             "reference_url": _reference_url(raw.get("reference_url"), lora_id),
+            "aliases": tuple(aliases),
         })
     return tuple(normalized)
 
@@ -147,10 +160,12 @@ CONFIGURED_LORAS = normalize_loras(_load_local_loras())
 
 def public_loras() -> list[dict]:
     private_fields = {"repo", "source", "revision"}
-    return [
-        {key: value for key, value in lora.items() if key not in private_fields}
-        for lora in CONFIGURED_LORAS
-    ]
+    result = []
+    for lora in CONFIGURED_LORAS:
+        public = {key: value for key, value in lora.items() if key not in private_fields}
+        public["aliases"] = list(lora["aliases"])
+        result.append(public)
+    return result
 
 
 def download_specs() -> list[tuple[str, str, str, str, str]]:
@@ -176,23 +191,30 @@ def resolve_lora_strengths(value: Mapping | None) -> dict[str, float]:
     if not isinstance(value, Mapping):
         raise ValueError("loras must be a JSON object")
     configured = {lora["id"]: lora for lora in CONFIGURED_LORAS}
+    accepted = {
+        accepted_id: lora["id"]
+        for lora in CONFIGURED_LORAS
+        for accepted_id in (lora["id"], *lora["aliases"])
+    }
     if any(not isinstance(key, str) for key in value):
         raise ValueError("LoRA ids must be strings")
-    unknown = sorted(set(value) - set(configured))
+    unknown = sorted(set(value) - set(accepted))
     if unknown:
         raise ValueError(f"unknown or unavailable LoRAs: {unknown}")
-    resolved = {}
-    for lora_id, raw_strength in value.items():
+
+    requested = {}
+    for requested_id, raw_strength in value.items():
+        lora_id = accepted[requested_id]
         lora = configured[lora_id]
-        strength = _finite_number(raw_strength, f"{lora_id} strength")
+        strength = _finite_number(raw_strength, f"{requested_id} strength")
         if not lora["min_strength"] <= strength <= lora["max_strength"]:
             raise ValueError(
-                f"LoRA {lora_id} strength must be between "
+                f"LoRA {requested_id} strength must be between "
                 f"{lora['min_strength']} and {lora['max_strength']}"
             )
-        if strength > 0:
-            resolved[lora_id] = strength
-    return resolved
+        if requested_id == lora_id or lora_id not in requested:
+            requested[lora_id] = strength
+    return {lora_id: strength for lora_id, strength in requested.items() if strength > 0}
 
 
 def active_loras(strengths: Mapping[str, float]) -> list[dict]:

@@ -33,6 +33,10 @@ from minimax_h3.runtime import (
     PYTORCH_VERSION,
     TORCHAUDIO_VERSION,
     TORCHVISION_VERSION,
+    SPARSE_ATTENTION_DENSER_EARLY,
+    SPARSE_ATTENTION_IMPLEMENTATION,
+    SPARSE_ATTENTION_VERSION,
+    SPARSE_ATTENTION_VIDEO_BUDGET,
     verify_gpu_runtime,
 )
 from minimax_h3.config import (
@@ -59,10 +63,12 @@ from modal_services import jobs
 COMFY_COMMIT = "2f35f4a08176d993cded35dac3332be4f7287f41"
 MODEL_REVISION = "cfc0a7e86b7bfd99199db90a536ab187af61a8b9"
 MODEL_REPO = "Comfy-Org/MiniMax-H3"
-TURBO_REVISION = "e6346777701aa2b64d42ed058cdd71ae00e7cd52"
+TURBO_REVISION = "05ef678438e84933c406131b59abbf86919b3aac"
 TURBO_REPO = "lightx2v/Minimax-h3-Turbo"
 SPECTRUM_COMMIT = "567768f0de500ffbaf404dd9527c7a537819f7cd"
 SPECTRUM_REPO = "https://github.com/xmarre/ComfyUI-Spectrum-MiniMax-H3.git"
+H3_OPTIMIZATIONS_COMMIT = "379f9c7922b3d7831dd93ae069ba0cb82cb4cf36"
+H3_OPTIMIZATIONS_REPO = "https://github.com/Zironic/H3-Optimizations.git"
 
 MODEL_DOWNLOADS = [
     (
@@ -157,6 +163,15 @@ comfy_image = (
         "git -C /root/comfy/ComfyUI/custom_nodes/ComfyUI-Spectrum-MiniMax-H3 "
         f"checkout --detach {SPECTRUM_COMMIT}",
     )
+    .run_commands(
+        "git init /root/comfy/ComfyUI/custom_nodes/H3-Optimizations",
+        "git -C /root/comfy/ComfyUI/custom_nodes/H3-Optimizations "
+        f"remote add origin {H3_OPTIMIZATIONS_REPO}",
+        "git -C /root/comfy/ComfyUI/custom_nodes/H3-Optimizations "
+        f"fetch --depth 1 origin {H3_OPTIMIZATIONS_COMMIT}",
+        "git -C /root/comfy/ComfyUI/custom_nodes/H3-Optimizations "
+        f"checkout --detach {H3_OPTIMIZATIONS_COMMIT}",
+    )
     .pip_install(
         f"torch=={PYTORCH_VERSION}",
         f"torchvision=={TORCHVISION_VERSION}",
@@ -233,6 +248,7 @@ class H3Service:
             duration_seconds=5,
             seed=0,
             output_stem="audit",
+            sparse_attention=True,
         )
         comfy_client.audit_workflow_nodes(audit, self.port)
         reference_audit = build_reference_workflow(
@@ -387,6 +403,8 @@ class H3Service:
         sampler: str | None = None,
         scheduler: str | None = None,
         loras: dict[str, float] | None = None,
+        sparse_attention: bool = False,
+        sparse_attention_video_budget: float = SPARSE_ATTENTION_VIDEO_BUDGET,
         first_frame: bytes | None = None,
         last_frame: bytes | None = None,
         job_id: str | None = None,
@@ -411,6 +429,8 @@ class H3Service:
             raise ValueError("mode must be 'frames' or 'references'")
         if not isinstance(turbo, bool):
             raise ValueError("turbo must be a boolean")
+        if not isinstance(sparse_attention, bool):
+            raise ValueError("sparse_attention must be a boolean")
         profile_id, profile = resolve_sampling_profile(
             sampling_profile,
             turbo=turbo,
@@ -457,6 +477,8 @@ class H3Service:
                     sampler=sampler,
                     scheduler=scheduler,
                     loras=loras,
+                    sparse_attention=sparse_attention,
+                    sparse_attention_video_budget=sparse_attention_video_budget,
                     output_stem=output_stem,
                     references=staged_references,
                     ref_image_size=ref_image_size,
@@ -474,6 +496,8 @@ class H3Service:
                     sampler=sampler,
                     scheduler=scheduler,
                     loras=loras,
+                    sparse_attention=sparse_attention,
+                    sparse_attention_video_budget=sparse_attention_video_budget,
                     output_stem=output_stem,
                     first_frame_filename=first,
                     last_frame_filename=last,
@@ -520,6 +544,7 @@ class H3Service:
                 "attention": {
                     "backend": ATTENTION_BACKEND,
                     "version": COMFY_KITCHEN_VERSION,
+                    "sparse": sparse_attention,
                 },
                 "audio": {"native": True, "sample_rate_hz": 32000, "channels": 2},
             }
@@ -533,6 +558,13 @@ class H3Service:
                     "version": SPECTRUM_VERSION,
                     "offline_smoothing_replay": True,
                     "audio_blend_weight": 0.0,
+                }
+            if sparse_attention:
+                metadata["sparse_attention"] = {
+                    "implementation": SPARSE_ATTENTION_IMPLEMENTATION,
+                    "version": SPARSE_ATTENTION_VERSION,
+                    "video_budget": sparse_attention_video_budget,
+                    "denser_early": SPARSE_ATTENTION_DENSER_EARLY,
                 }
             if loras:
                 metadata["loras"] = active_loras(loras)

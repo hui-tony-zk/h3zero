@@ -1,6 +1,7 @@
 import type { GenerationMetadata, H3Specs, JobCreateResponse, JobProgress, JobStatus, JobStatusResponse } from "../../types";
 
 const jobStatuses = new Set<JobStatus>(["queued", "running", "completed", "failed", "expired", "cancelled"]);
+const loraIdPattern = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("The H3 API returned an invalid object.");
@@ -46,14 +47,32 @@ function metadata(value: unknown): GenerationMetadata | undefined {
 
 export function parseSpecs(value: unknown): H3Specs {
   const source = record(value);
-  if (source.version !== "1.7") throw new Error(`Unsupported H3 spec version: ${String(source.version)}`);
+  if (source.version !== "1.8") throw new Error(`Unsupported H3 spec version: ${String(source.version)}`);
   const modes = record(source.modes);
   record(modes.frames);
   record(modes.references);
   const output = record(source.output);
-  record(output.attention);
+  const attention = record(output.attention);
+  record(attention.sparse);
   if (output.loras === undefined) output.loras = [];
   if (!Array.isArray(output.loras)) throw new Error("The H3 API returned an invalid LoRA catalog.");
+  const loraIds = new Set<string>();
+  for (const value of output.loras) {
+    const lora = record(value);
+    if (typeof lora.id !== "string" || !loraIdPattern.test(lora.id) || loraIds.has(lora.id)) {
+      throw new Error("The H3 API returned an invalid LoRA ID.");
+    }
+    loraIds.add(lora.id);
+    const aliases = lora.aliases ?? [];
+    if (!Array.isArray(aliases)) throw new Error("The H3 API returned invalid LoRA aliases.");
+    for (const alias of aliases) {
+      if (typeof alias !== "string" || !loraIdPattern.test(alias) || loraIds.has(alias)) {
+        throw new Error("The H3 API returned invalid LoRA aliases.");
+      }
+      loraIds.add(alias);
+    }
+    lora.aliases = aliases;
+  }
   const sampling = record(output.sampling);
   const profiles = record(sampling.profiles);
   record(profiles.turbo_4);

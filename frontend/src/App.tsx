@@ -280,7 +280,8 @@ export default function App() {
   }, []);
   const remix = useCallback(async (job: Job) => {
     try {
-      await drafts.restoreInputs(job);
+      if (!specs) throw new Error(specError ?? "H3 settings are still loading.");
+      await drafts.restoreInputs(job, specs.output.loras);
       setProjectReplacementTarget(null);
       setWorkspace("videos");
       setComposerOpen(true);
@@ -290,7 +291,7 @@ export default function App() {
         message: error instanceof Error ? error.message : "Could not restore favorite inputs",
       });
     }
-  }, [drafts]);
+  }, [drafts, specError, specs]);
 
   const addToProject = useCallback((job: Job, projectId: string) => {
     projects.addJob(projectId, job);

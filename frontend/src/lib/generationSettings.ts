@@ -97,6 +97,10 @@ export function generationSettingSections(job: Job): GenerationSettingSection[] 
 
   const acceleration: GenerationSetting[] = [
     ...item("Attention", metadata?.attention ? `Comfy Kitchen · v${metadata.attention.version}` : undefined),
+    ...item("Sparse attention", (metadata?.attention?.sparse ?? job.sparseAttention) ? "Enabled" : "Disabled"),
+    ...item("Sparse implementation", metadata?.sparse_attention ? `${metadata.sparse_attention.implementation} · v${metadata.sparse_attention.version}` : undefined),
+    ...item("Video attention retained", metadata?.sparse_attention ? `${Math.round(metadata.sparse_attention.video_budget * 100)}%` : undefined),
+    ...item("Denser early ramp", metadata?.sparse_attention ? (metadata.sparse_attention.denser_early ? "Enabled" : "Disabled") : undefined),
     ...item("Turbo LoRA", metadata?.lora),
     ...item("Turbo LoRA strength", metadata?.lora_strength),
     ...item("Spectrum", metadata?.spectrum ? `v${metadata.spectrum.version}` : undefined),

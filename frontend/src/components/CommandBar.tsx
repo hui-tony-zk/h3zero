@@ -4,7 +4,7 @@ import { useState } from "react";
 import { ratiosMatch } from "../lib/assets";
 import { hasReferencePromptContent } from "../lib/promptDefaults";
 import { isTurboProfile, profileLabel, samplingProfileId } from "../lib/sampling";
-import type { AspectId, BaseDraft, ComposerDraft, GenerationCount, GenerationMode, H3Specs, MediaAsset, SamplingProfileId } from "../types";
+import type { AspectId, BaseDraft, ComposerDraft, GenerationCount, GenerationMode, H3Specs, MediaAsset, SamplingProfileId, SparseAttentionBudget } from "../types";
 import { CropModal } from "./CropModal";
 import { MediaViewer } from "./MediaViewer";
 import { LoraMixer } from "./LoraMixer";
@@ -52,6 +52,11 @@ export function CommandBar({ draft, specs, open, launching, onOpenChange, onMode
   const profileOptions = specs
     ? (Object.keys(specs.output.sampling.profiles) as SamplingProfileId[]).map((profile) => ({ value: profile, label: profileLabel(profile) }))
     : [{ value: selectedProfile, label: profileLabel(selectedProfile) }];
+  const sparseBudget = draft.sparseAttentionBudget ?? specs?.output.attention.sparse.video_budget ?? 0.3;
+  const sparseValue = draft.sparseAttention ? String(sparseBudget) : "off";
+  const sparseOptions = specs
+    ? [{ value: "off", label: "Off — full attention" }, ...specs.output.attention.sparse.video_budgets.map(({ value, label }) => ({ value: String(value), label }))]
+    : [{ value: "off", label: "Off — full attention" }];
   const hasFrame = draft.mode === "frames" && (!!draft.firstFrame || !!draft.lastFrame);
   const hasVisualReference = references.some((asset) => asset.kind === "image" || asset.kind === "video");
   const referenceReady = !!specs && (draft.mode === "frames" || (specs.modes.references.available && references.length > 0 && (!specs.modes.references.attachments.audio_may_not_be_sole_modality || hasVisualReference)));
@@ -114,6 +119,7 @@ export function CommandBar({ draft, specs, open, launching, onOpenChange, onMode
             {!hasFrame && <ControlSelect value={draft.aspect} label={draft.aspect} options={specs ? specs.output.geometry.native_aspects.map(({ id }) => ({ value: id as AspectId, label: id })) : [{ value: draft.aspect, label: draft.aspect }]} onChange={(aspect) => onUpdate({ aspect })} />}
             <ControlSelect value={draft.generationCount} label={`${draft.generationCount}x`} options={([1, 2, 3] as GenerationCount[]).map((count) => ({ value: count, label: `${count}x` }))} onChange={(generationCount) => onUpdate({ generationCount })} />
             <ControlSelect<SamplingProfileId> value={selectedProfile} label={profileLabel(selectedProfile)} options={profileOptions} onChange={(samplingProfile) => onUpdate({ samplingProfile, turbo: isTurboProfile(samplingProfile), seed: "random", resolution: "480p" })} />
+            {!!specs?.output.attention.sparse.available && <ControlSelect<string> value={sparseValue} label={`Sparse · ${draft.sparseAttention ? `${Math.round(sparseBudget * 100)}%` : "Off"}`} options={sparseOptions} onChange={(value) => onUpdate(value === "off" ? { sparseAttention: false } : { sparseAttention: true, sparseAttentionBudget: Number(value) as SparseAttentionBudget })} accent={draft.sparseAttention === true} />}
             <div className="ml-auto flex items-center gap-2"><a href={promptGuides[draft.mode]} target="_blank" rel="noreferrer" title={`${draft.mode === "frames" ? "Frames" : "References"} prompt guide`} aria-label={`Open the official ${draft.mode === "frames" ? "frames" : "references"} prompt guide`} className="inline-flex h-8 items-center gap-1 rounded-full px-2 text-[10px] font-semibold text-reelo-dim hover:bg-white/6 hover:text-reelo-text">Prompt guide<ExternalLink size={11} /></a><button type="button" disabled={!ready} onClick={() => void launch()} title={!specs ? "Loading H3 settings" : draft.mode === "references" && !hasVisualReference ? "Add at least one image or video" : `Generate ${draft.generationCount === 1 ? "video" : `${draft.generationCount} videos`}`} className="flex h-9 items-center gap-2 rounded-full bg-reelo-accent px-4 text-xs font-bold text-black hover:bg-[#69c7ff] disabled:cursor-not-allowed disabled:bg-white/7 disabled:text-white/25">{launching ? <LoaderCircle size={14} className="animate-spin" /> : <>Generate{draft.generationCount > 1 ? ` ${draft.generationCount}` : ""} <ArrowRight size={14} /></>}</button></div>
           </div>
         </div>

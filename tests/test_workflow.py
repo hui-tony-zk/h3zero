@@ -51,7 +51,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(workflow["turbo_lora"]["class_type"], "LoraLoaderModelOnly")
         self.assertEqual(workflow["turbo_lora"]["inputs"], {
             "model": ["model", 0],
-            "lora_name": "minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors",
+            "lora_name": "minimax_h3_fl2v_turbo_4step_v1.1_768p_comfyui_bf16.safetensors",
             "strength_model": 1.0,
         })
         self.assertEqual(workflow["sampler"], {
@@ -90,7 +90,7 @@ class WorkflowTests(unittest.TestCase):
         )
         self.assertEqual(
             turbo_8["turbo_lora"]["inputs"]["lora_name"],
-            "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+            "minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
         )
         self.assertEqual(turbo_8["scheduler"]["inputs"]["steps"], 8)
 
@@ -109,6 +109,67 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(spectrum["spectrum"]["inputs"]["model_aware_mode"], "off")
         self.assertEqual(spectrum["scheduler"]["inputs"]["steps"], 30)
         self.assertEqual(spectrum["scheduler"]["inputs"]["model"], ["spectrum", 0])
+
+    def test_sparse_attention_is_opt_in_and_precedes_spectrum(self):
+        dense = build_frames_workflow(
+            prompt="Dense baseline.",
+            width=864,
+            height=480,
+            duration_seconds=5,
+            seed=42,
+        )
+        self.assertNotIn("sparse_attention", dense)
+
+        sparse = build_frames_workflow(
+            prompt="Sparse preview.",
+            width=864,
+            height=480,
+            duration_seconds=5,
+            seed=42,
+            sampling_profile="spectrum",
+            sparse_attention=True,
+        )
+        self.assertEqual(sparse["sparse_attention"], {
+            "class_type": "H3SparseAttention",
+            "inputs": {
+                "model": ["model", 0],
+                "video_budget": 0.3,
+                "denser_early_late_steps": True,
+            },
+        })
+        self.assertEqual(sparse["spectrum"]["inputs"]["model"], ["sparse_attention", 0])
+        self.assertEqual(sparse["scheduler"]["inputs"]["model"], ["spectrum", 0])
+
+        fastest = build_frames_workflow(
+            prompt="Fastest sparse preview.",
+            width=864,
+            height=480,
+            duration_seconds=5,
+            seed=42,
+            sparse_attention=True,
+            sparse_attention_video_budget=0.1,
+        )
+        self.assertEqual(fastest["sparse_attention"]["inputs"]["video_budget"], 0.1)
+
+        with self.assertRaisesRegex(ValueError, "sparse_attention must be a boolean"):
+            build_frames_workflow(
+                prompt="Invalid sparse value.",
+                width=864,
+                height=480,
+                duration_seconds=5,
+                seed=42,
+                sparse_attention="yes",
+            )
+        with self.assertRaisesRegex(ValueError, "must be 0.1, 0.15, or 0.3"):
+            build_frames_workflow(
+                prompt="Unsupported sparse budget.",
+                width=864,
+                height=480,
+                duration_seconds=5,
+                seed=42,
+                sparse_attention=True,
+                sparse_attention_video_budget=0.2,
+            )
 
     def test_rejects_oversized_canvas(self):
         with self.assertRaisesRegex(ValueError, "must not exceed"):
@@ -266,6 +327,7 @@ class WorkflowTests(unittest.TestCase):
             "source": "pose.safetensors",
             "revision": "abc",
             "prompt": None,
+            "aliases": (),
         },)
         with (
             patch("minimax_h3.loras.CONFIGURED_LORAS", configured),

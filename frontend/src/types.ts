@@ -6,6 +6,7 @@ export type GenerationCount = 1 | 2 | 3;
 export type SamplingProfileId = "turbo_4" | "turbo_8" | "spectrum" | "base";
 export type SeedChoice = "random" | 42 | 106 | 99;
 export type ResolutionId = "480p" | "768p";
+export type SparseAttentionBudget = 0.1 | 0.15 | 0.3;
 export type MediaKind = "image" | "video" | "audio" | "file";
 export type PromptDocument = JSONContent;
 
@@ -33,11 +34,14 @@ export interface BaseDraft {
   seed?: SeedChoice;
   resolution?: ResolutionId;
   turbo?: boolean;
+  sparseAttention?: boolean;
+  sparseAttentionBudget?: SparseAttentionBudget;
   loras?: Record<string, number>;
 }
 
 export interface LoraConfig {
   id: string;
+  aliases: string[];
   name: string;
   filename: string;
   default_enabled: boolean;
@@ -113,13 +117,26 @@ export interface SamplingProfile {
 }
 
 export interface H3Specs {
-  version: "1.7";
+  version: "1.8";
   modes: {
     frames: FramesModeSpec;
     references: ReferencesModeSpec;
   };
   output: {
-    attention: { backend: "comfy_kitchen"; version: string; scope: "global" };
+    attention: {
+      backend: "comfy_kitchen";
+      version: string;
+      scope: "global";
+      sparse: {
+        available: boolean;
+        default: boolean;
+        implementation: "h3_optimizations";
+        version: string;
+        video_budget: SparseAttentionBudget;
+        video_budgets: Array<{ value: SparseAttentionBudget; label: string }>;
+        denser_early: boolean;
+      };
+    };
     loras: LoraConfig[];
     sampling: {
       default: SamplingProfileId;
@@ -171,7 +188,8 @@ export interface GenerationMetadata {
   lora?: string;
   lora_strength?: number;
   lora_low_vram?: boolean;
-  attention?: { backend: string; version: string };
+  attention?: { backend: string; version: string; sparse?: boolean };
+  sparse_attention?: { implementation: string; version: string; video_budget: number; denser_early: boolean };
   spectrum?: { version: string; offline_smoothing_replay: boolean; audio_blend_weight: number };
   loras?: Array<{ id: string; name: string; filename: string; strength: number }>;
   audio?: { native: boolean; sample_rate_hz: number; channels: number };
@@ -214,6 +232,8 @@ export interface Job {
   samplingProfile?: SamplingProfileId;
   seed?: SeedChoice;
   resolution?: ResolutionId;
+  sparseAttention?: boolean;
+  sparseAttentionBudget?: SparseAttentionBudget;
   loras?: Record<string, number>;
   displayAspect?: number;
   inputAssetIds: string[];

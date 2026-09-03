@@ -42,8 +42,11 @@ generation: the four-step and eight-step
 [Spectrum](https://github.com/xmarre/ComfyUI-Spectrum-MiniMax-H3) at 30 steps,
 and the original Base workflow at 30 steps. All four options generate at 480p
 with a random seed; resolution and seed controls are intentionally omitted.
-Every profile uses Comfy Kitchen INT8 attention globally. Spectrum remains an
-additional transformer-forecasting layer only for the Spectrum profile.
+Every profile uses Comfy Kitchen INT8 attention globally. An optional Sparse
+attention control offers 30%, 15%, and 10% target-video attention retention
+with a denser early ramp; it is off by default because it can change prompt
+adherence, motion, and detail. Spectrum remains an additional
+transformer-forecasting layer only for the Spectrum profile.
 
 Turbo is a preview. Cold starts and model loading add time, and actual speed
 varies with Modal capacity.

@@ -57,6 +57,8 @@ export function buildCreateJobRequest(draft: ComposerDraft, specs: H3Specs) {
     resolution,
     sampling_profile: profileId,
     turbo: isTurboProfile(profileId),
+    sparse_attention: draft.sparseAttention === true,
+    sparse_attention_video_budget: draft.sparseAttentionBudget ?? specs.output.attention.sparse.video_budget,
     seed: null,
     steps: sampling.steps.default,
     sampler: sampling.sampler,

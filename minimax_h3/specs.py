@@ -6,20 +6,27 @@ import copy
 import math
 
 from minimax_h3.loras import public_loras
-from minimax_h3.runtime import ATTENTION_BACKEND, COMFY_KITCHEN_VERSION
+from minimax_h3.runtime import (
+    ATTENTION_BACKEND,
+    COMFY_KITCHEN_VERSION,
+    SPARSE_ATTENTION_DENSER_EARLY,
+    SPARSE_ATTENTION_IMPLEMENTATION,
+    SPARSE_ATTENTION_VERSION,
+    SPARSE_ATTENTION_VIDEO_BUDGET,
+)
 
 FPS = 24
 CANVAS_MULTIPLE = 32
 BASE_SHORT_EDGE = 480
 MAX_PIXELS = 768 * 1344
-SPEC_VERSION = "1.7"
+SPEC_VERSION = "1.8"
 BASE_MIN_STEPS = 30
 BASE_STEPS = 30
 BASE_MAX_STEPS = 30
 BASE_SAMPLER = "res_multistep"
 BASE_SCHEDULER = "simple"
-TURBO_4_LORA = "minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors"
-TURBO_8_LORA = "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors"
+TURBO_4_LORA = "minimax_h3_fl2v_turbo_4step_v1.1_768p_comfyui_bf16.safetensors"
+TURBO_8_LORA = "minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors"
 SPECTRUM_VERSION = "0.2.16"
 TURBO_LORA = TURBO_4_LORA
 TURBO_LORA_STRENGTH = 1.0
@@ -290,6 +297,19 @@ _SPECS = {
             "backend": ATTENTION_BACKEND,
             "version": COMFY_KITCHEN_VERSION,
             "scope": "global",
+            "sparse": {
+                "available": True,
+                "default": False,
+                "implementation": SPARSE_ATTENTION_IMPLEMENTATION,
+                "version": SPARSE_ATTENTION_VERSION,
+                "video_budget": SPARSE_ATTENTION_VIDEO_BUDGET,
+                "video_budgets": [
+                    {"value": 0.30, "label": "30% — Balanced"},
+                    {"value": 0.15, "label": "15% — Fast"},
+                    {"value": 0.10, "label": "10% — Fastest"},
+                ],
+                "denser_early": SPARSE_ATTENTION_DENSER_EARLY,
+            },
         },
         "loras": public_loras(),
         "sampling": {

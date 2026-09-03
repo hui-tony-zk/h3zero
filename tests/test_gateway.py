@@ -265,6 +265,8 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(payload["steps"], 4)
         self.assertEqual(payload["sampler"], "res_multistep")
         self.assertEqual(payload["scheduler"], "simple")
+        self.assertFalse(payload["sparse_attention"])
+        self.assertEqual(payload["sparse_attention_video_budget"], 0.3)
 
         pending = self.client.get(f"/api/jobs/{job_id}")
         self.assertEqual(pending.json()["status"], "queued")
@@ -575,6 +577,14 @@ class GatewayTests(unittest.TestCase):
             (spectrum["turbo"], spectrum["steps"], spectrum["seed"]),
             (False, 30, 106),
         )
+        self.assertTrue(parse_config("test", '{"sparse_attention":true}')["sparse_attention"])
+        self.assertEqual(
+            parse_config(
+                "test",
+                '{"sparse_attention":true,"sparse_attention_video_budget":0.15}',
+            )["sparse_attention_video_budget"],
+            0.15,
+        )
         high_resolution = parse_config(
             "test",
             '{"resolution":"768p","width":1344,"height":768}',
@@ -589,6 +599,10 @@ class GatewayTests(unittest.TestCase):
             parse_config("test", '{"sampling_profile":"unknown"}')
         with self.assertRaisesRegex(ValueError, "turbo must be a boolean"):
             parse_config("test", '{"turbo": "no"}')
+        with self.assertRaisesRegex(ValueError, "sparse_attention must be a boolean"):
+            parse_config("test", '{"sparse_attention": "yes"}')
+        with self.assertRaisesRegex(ValueError, "must be 0.1, 0.15, or 0.3"):
+            parse_config("test", '{"sparse_attention_video_budget":0.2}')
         with self.assertRaisesRegex(ValueError, "resolution must be one of"):
             parse_config("test", '{"resolution":"1080p"}')
         with self.assertRaisesRegex(ValueError, "unknown or unavailable LoRAs"):

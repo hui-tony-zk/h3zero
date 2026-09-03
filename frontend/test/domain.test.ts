@@ -11,6 +11,7 @@ import { describeFavoriteAssets, mergeFavoriteSnapshot, parseFavoriteSnapshot } 
 import { normalizeCloudSyncUsername } from "../src/lib/cloudSync";
 import { generationSettingSections } from "../src/lib/generationSettings";
 import { samplingProfileId } from "../src/lib/sampling";
+import { remixLoraStrengths } from "../src/lib/loras";
 import type { Job } from "../src/types";
 import { emptyFramesDraft, emptyReferencesDraft } from "../src/lib/storage/draftRepository";
 import { asset } from "./fixtures";
@@ -98,12 +99,35 @@ test("new drafts default to two generations", () => {
   assert.equal(emptyFramesDraft().generationCount, 2);
   assert.equal(emptyReferencesDraft().generationCount, 2);
   assert.equal(emptyFramesDraft().turbo, true);
+  assert.equal(emptyFramesDraft().sparseAttention, false);
+  assert.equal(emptyFramesDraft().sparseAttentionBudget, 0.3);
 });
 
 test("remix profile restoration preserves every explicit sampling profile", () => {
   for (const profile of ["turbo_4", "turbo_8", "spectrum", "base"] as const) {
     assert.equal(samplingProfileId({ samplingProfile: profile, turbo: profile.startsWith("turbo_") }), profile);
   }
+});
+
+test("remix maps obsolete LoRA IDs without changing historical job metadata", () => {
+  const job = {
+    id: "legacy", mode: "frames", prompt: "", duration: 5, aspect: "16:9",
+    inputAssetIds: [], contentUrl: "", status: "completed", createdAt: 1, updatedAt: 1,
+    loras: { "mysticxxx-mmh3-v2": 0.65 },
+    metadata: {
+      loras: [{ id: "mysticxxx-mmh3-v2", name: "Mystic XXX v2.0", filename: "MysticXXX_MMH3-V2.safetensors", strength: 0.65 }],
+    },
+  } as Job;
+  const historicalLoras = structuredClone(job.loras);
+  const historicalMetadata = structuredClone(job.metadata);
+  const remixed = remixLoraStrengths(job.loras, [{
+    id: "mysticxxx-mmh3-v4", aliases: ["mysticxxx-mmh3-v1", "mysticxxx-mmh3-v2", "mysticxxx-mmh3-v3"],
+    name: "Mystic XXX v4.0", filename: "MysticXXX_MMH3-V4.safetensors",
+    default_enabled: false, default_strength: 1, min_strength: 0, max_strength: 1.5, step: 0.1,
+  }]);
+  assert.deepEqual(remixed, { "mysticxxx-mmh3-v4": 0.65 });
+  assert.deepEqual(job.loras, historicalLoras);
+  assert.deepEqual(job.metadata, historicalMetadata);
 });
 
 test("generation settings expose resolved metadata with the prompt last", () => {
@@ -118,7 +142,8 @@ test("generation settings expose resolved metadata with the prompt last", () => 
       steps: 4, sampler: "res_multistep", scheduler: "simple", turbo: true,
       sampling_profile: "turbo_4", resolution: "768p",
       lora: "turbo.safetensors", lora_strength: 1,
-      attention: { backend: "comfy_kitchen", version: "0.2.31" },
+      attention: { backend: "comfy_kitchen", version: "0.2.31", sparse: true },
+      sparse_attention: { implementation: "h3_optimizations", version: "0.2.41", video_budget: 0.3, denser_early: true },
       audio: { native: true, sample_rate_hz: 32000, channels: 2 },
     },
   } as Job;
@@ -128,6 +153,8 @@ test("generation settings expose resolved metadata with the prompt last", () => 
   assert.equal(flat.find((entry) => entry.label === "Output size")?.value, "768 × 1344");
   assert.equal(flat.find((entry) => entry.label === "Generation time")?.value, "1m 2s · sampling → video ready");
   assert.equal(flat.find((entry) => entry.label === "Attention")?.value, "Comfy Kitchen · v0.2.31");
+  assert.equal(flat.find((entry) => entry.label === "Sparse attention")?.value, "Enabled");
+  assert.equal(flat.find((entry) => entry.label === "Video attention retained")?.value, "30%");
   assert.equal(sections.at(-1)?.title, "Prompt");
   assert.equal(sections.at(-1)?.text, job.prompt);
   const withoutStart = generationSettingSections({ ...job, samplingStartedAt: undefined });

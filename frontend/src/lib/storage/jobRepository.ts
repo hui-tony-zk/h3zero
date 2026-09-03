@@ -1,4 +1,4 @@
-import type { AspectId, FavoriteAsset, GenerationMode, Job, JobStatus, ResolutionId, SamplingProfileId, SeedChoice } from "../../types";
+import type { AspectId, FavoriteAsset, GenerationMode, Job, JobStatus, ResolutionId, SamplingProfileId, SeedChoice, SparseAttentionBudget } from "../../types";
 import { isTurboProfile } from "../sampling";
 
 const STORAGE_KEY = "h3-studio-jobs-v2";
@@ -57,6 +57,8 @@ export function restoreJob(value: unknown): Job | null {
     : source.turbo === false ? "spectrum" : "turbo_4") as SamplingProfileId;
   const seed = (source.seed === 42 || source.seed === 106 || source.seed === 99 ? source.seed : "random") as SeedChoice;
   const resolution = (source.resolution === "768p" ? "768p" : "480p") as ResolutionId;
+  const sparseAttentionBudget = (source.sparseAttentionBudget === 0.1 || source.sparseAttentionBudget === 0.15
+    ? source.sparseAttentionBudget : 0.3) as SparseAttentionBudget;
   return {
     id: source.id, mode: jobMode, status: jobStatus,
     prompt: typeof source.prompt === "string" ? source.prompt : "",
@@ -69,6 +71,8 @@ export function restoreJob(value: unknown): Job | null {
     samplingProfile,
     seed,
     resolution,
+    sparseAttention: source.sparseAttention === true,
+    sparseAttentionBudget,
     loras: numberRecord(source.loras),
     displayAspect: typeof source.displayAspect === "number" ? source.displayAspect : undefined,
     inputAssetIds,

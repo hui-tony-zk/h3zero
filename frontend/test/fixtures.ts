@@ -1,7 +1,7 @@
 import type { H3Specs, MediaAsset } from "../src/types";
 
 export const specs: H3Specs = {
-  version: "1.7",
+  version: "1.8",
   modes: {
     frames: { available: true, attachments: { mime_types: ["image/png"], max_bytes_each: 20 * 1024 * 1024 } },
     references: { available: true, order: "upload_order", attachments: {
@@ -12,11 +12,11 @@ export const specs: H3Specs = {
     } },
   },
   output: {
-    attention: { backend: "comfy_kitchen", version: "0.2.31", scope: "global" },
+    attention: { backend: "comfy_kitchen", version: "0.2.31", scope: "global", sparse: { available: true, default: false, implementation: "h3_optimizations", version: "0.2.41", video_budget: 0.3, video_budgets: [{ value: 0.3, label: "30% — Balanced" }, { value: 0.15, label: "15% — Fast" }, { value: 0.1, label: "10% — Fastest" }], denser_early: true } },
     loras: [],
     sampling: { default: "turbo_4", profiles: {
-      turbo_4: { label: "Turbo · 4 steps", method: "LightX2V MiniMax-H3 Turbo 4-step LoRA", lora: "minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors", preview: true, steps: { default: 4, min: 4, max: 4 }, sampler: "res_multistep", scheduler: "simple", lora_strength: 1, spectrum: false, turbo: true, low_vram: null },
-      turbo_8: { label: "8 step LoRA", method: "LightX2V MiniMax-H3 Turbo 8-step LoRA", lora: "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors", preview: true, steps: { default: 8, min: 8, max: 8 }, sampler: "res_multistep", scheduler: "simple", lora_strength: 1, spectrum: false, turbo: true, low_vram: null },
+      turbo_4: { label: "Turbo · 4 steps", method: "LightX2V MiniMax-H3 Turbo 4-step LoRA", lora: "minimax_h3_fl2v_turbo_4step_v1.1_768p_comfyui_bf16.safetensors", preview: true, steps: { default: 4, min: 4, max: 4 }, sampler: "res_multistep", scheduler: "simple", lora_strength: 1, spectrum: false, turbo: true, low_vram: null },
+      turbo_8: { label: "8 step LoRA", method: "LightX2V MiniMax-H3 Turbo 8-step LoRA", lora: "minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors", preview: true, steps: { default: 8, min: 8, max: 8 }, sampler: "res_multistep", scheduler: "simple", lora_strength: 1, spectrum: false, turbo: true, low_vram: null },
       spectrum: { label: "Spectrum · 30 steps", method: "MiniMax-H3 Base with Spectrum v0.2.16", lora: null, preview: true, steps: { default: 30, min: 30, max: 30 }, sampler: "res_multistep", scheduler: "simple", lora_strength: null, spectrum: true, turbo: false, low_vram: null },
       base: { label: "Base · 30 steps", method: "MiniMax-H3 Base", lora: null, preview: false, steps: { default: 30, min: 30, max: 30 }, sampler: "res_multistep", scheduler: "simple", lora_strength: null, spectrum: false, turbo: false, low_vram: null },
     } },

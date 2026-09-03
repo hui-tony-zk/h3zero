@@ -6,7 +6,7 @@ from minimax_h3.specs import get_specs, native_canvas
 class SpecsTests(unittest.TestCase):
     def test_authoritative_capabilities_snapshot(self):
         specs = get_specs()
-        self.assertEqual(specs["version"], "1.7")
+        self.assertEqual(specs["version"], "1.8")
         self.assertTrue(specs["modes"]["references"]["available"])
         self.assertEqual(
             specs["modes"]["references"]["model"],
@@ -38,7 +38,7 @@ class SpecsTests(unittest.TestCase):
         self.assertEqual(turbo["sampler"], "res_multistep")
         self.assertEqual(
             turbo["lora"],
-            "minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors",
+            "minimax_h3_fl2v_turbo_4step_v1.1_768p_comfyui_bf16.safetensors",
         )
         self.assertEqual(turbo["lora_strength"], 1.0)
         self.assertIsNone(turbo["low_vram"])
@@ -47,7 +47,24 @@ class SpecsTests(unittest.TestCase):
         self.assertEqual(spectrum["steps"], {"default": 30, "min": 30, "max": 30})
         self.assertEqual(
             specs["output"]["attention"],
-            {"backend": "comfy_kitchen", "version": "0.2.31", "scope": "global"},
+            {
+                "backend": "comfy_kitchen",
+                "version": "0.2.31",
+                "scope": "global",
+                "sparse": {
+                    "available": True,
+                    "default": False,
+                    "implementation": "h3_optimizations",
+                    "version": "0.2.41",
+                    "video_budget": 0.3,
+                    "video_budgets": [
+                        {"value": 0.3, "label": "30% — Balanced"},
+                        {"value": 0.15, "label": "15% — Fast"},
+                        {"value": 0.1, "label": "10% — Fastest"},
+                    ],
+                    "denser_early": True,
+                },
+            },
         )
         self.assertEqual(
             specs["output"]["seed"]["options"],

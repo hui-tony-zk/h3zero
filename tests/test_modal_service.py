@@ -39,7 +39,7 @@ class ModalServiceDefinitionTests(unittest.TestCase):
         )
         self.assertNotIn("ComfyUI-MiniMax-H3-Turbo", source)
         self.assertIn(
-            'TURBO_REVISION = "e6346777701aa2b64d42ed058cdd71ae00e7cd52"',
+            'TURBO_REVISION = "05ef678438e84933c406131b59abbf86919b3aac"',
             source,
         )
         self.assertIn('TURBO_REPO = "lightx2v/Minimax-h3-Turbo"', source)
@@ -48,6 +48,11 @@ class ModalServiceDefinitionTests(unittest.TestCase):
             source,
         )
         self.assertIn("ComfyUI-Spectrum-MiniMax-H3", source)
+        self.assertIn(
+            'H3_OPTIMIZATIONS_COMMIT = "379f9c7922b3d7831dd93ae069ba0cb82cb4cf36"',
+            source,
+        )
+        self.assertIn("Zironic/H3-Optimizations", source)
         self.assertNotIn("SageAttention", source)
         self.assertIn('"loras",', source)
 

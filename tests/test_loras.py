@@ -67,6 +67,30 @@ class LoraConfigTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "between 0.0 and 1.5"):
                 loras.resolve_lora_strengths({"style": 2.0})
 
+    def test_aliases_are_validated_exposed_and_resolved_to_the_current_id(self):
+        configured = loras.normalize_loras([
+            self.entry(aliases=["style-v1", "style-v2"]),
+        ])
+        self.assertEqual(configured[0]["aliases"], ("style-v1", "style-v2"))
+        with patch("minimax_h3.loras.CONFIGURED_LORAS", configured):
+            self.assertEqual(loras.public_loras()[0]["aliases"], ["style-v1", "style-v2"])
+            self.assertEqual(loras.resolve_lora_strengths({"style-v1": 0.7}), {"style": 0.7})
+            self.assertEqual(
+                loras.resolve_lora_strengths({"style-v1": 0.7, "style": 0.9}),
+                {"style": 0.9},
+            )
+
+    def test_rejects_invalid_or_conflicting_aliases(self):
+        for aliases in ("style-v1", ["Style V1"], ["style"]):
+            with self.subTest(aliases=aliases):
+                with self.assertRaisesRegex(ValueError, "aliases|invalid alias|duplicate"):
+                    loras.normalize_loras([self.entry(aliases=aliases)])
+        with self.assertRaisesRegex(ValueError, "duplicate"):
+            loras.normalize_loras([
+                self.entry(id="current", aliases=["legacy"]),
+                self.entry(id="legacy"),
+            ])
+
     def test_missing_local_catalog_has_no_public_ui_entries(self):
         with patch("minimax_h3.loras.CONFIGURED_LORAS", ()):
             self.assertEqual(loras.public_loras(), [])

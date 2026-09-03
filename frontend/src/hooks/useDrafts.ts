@@ -5,7 +5,8 @@ import { readCloudSyncUsername } from "../lib/cloudSync";
 import { emptyFramesDraft, emptyReferencesDraft, readDrafts, writeDrafts } from "../lib/storage/draftRepository";
 import { promptDocumentToText, promptTextToDocument, prunePromptDocument, replaceReferenceInPromptDocument, restoreReferenceTokens } from "../lib/promptDocument";
 import { isTurboProfile, samplingProfileId } from "../lib/sampling";
-import type { BaseDraft, DraftCollection, GenerationMode, Job, MediaAsset, SamplingProfileId } from "../types";
+import { remixLoraStrengths } from "../lib/loras";
+import type { BaseDraft, DraftCollection, GenerationMode, Job, LoraConfig, MediaAsset, SamplingProfileId } from "../types";
 
 const defaults: DraftCollection = { frames: emptyFramesDraft(), references: emptyReferencesDraft() };
 
@@ -70,11 +71,15 @@ export function useDrafts() {
     });
   }, []);
 
-  const restoreInputs = useCallback(async (job: Job) => {
+  const restoreInputs = useCallback(async (job: Job, loraCatalog: LoraConfig[]) => {
     const savedProfile = job.metadata?.sampling_profile ?? job.samplingProfile ?? (job.turbo ? "turbo_4" : "spectrum") as SamplingProfileId;
     const samplingProfile = samplingProfileId({ samplingProfile: savedProfile, turbo: job.turbo });
     const seed = "random" as const;
     const resolution = "480p" as const;
+    const loras = remixLoraStrengths(job.loras, loraCatalog);
+    const sparseAttention = job.metadata?.attention?.sparse ?? job.sparseAttention ?? false;
+    const sparseAttentionBudget = job.metadata?.sparse_attention?.video_budget === 0.1 || job.metadata?.sparse_attention?.video_budget === 0.15
+      ? job.metadata.sparse_attention.video_budget : job.sparseAttentionBudget ?? 0.3;
     const restoreAsset = async (id: string) => {
       const local = await loadAsset(id);
       if (local) return local;
@@ -88,11 +93,11 @@ export function useDrafts() {
     if (job.mode === "references") {
       const references = (await Promise.all((job.referenceIds ?? job.inputAssetIds).map(restoreAsset))).filter((asset): asset is MediaAsset => asset !== null);
       const prompt = restoreReferenceTokens(job.prompt, references);
-      setDrafts((current) => ({ ...current, references: { ...current.references, prompt, promptDocument: promptTextToDocument(prompt, references), duration: job.duration, aspect: job.aspect, samplingProfile, seed, resolution, turbo: isTurboProfile(samplingProfile), loras: job.loras ?? {}, references } }));
+      setDrafts((current) => ({ ...current, references: { ...current.references, prompt, promptDocument: promptTextToDocument(prompt, references), duration: job.duration, aspect: job.aspect, samplingProfile, seed, resolution, turbo: isTurboProfile(samplingProfile), sparseAttention, sparseAttentionBudget, loras, references } }));
       return;
     }
     const [firstFrame, lastFrame] = await Promise.all([job.firstFrameId ? restoreAsset(job.firstFrameId) : null, job.lastFrameId ? restoreAsset(job.lastFrameId) : null]);
-    setDrafts((current) => ({ ...current, frames: { ...current.frames, prompt: job.prompt, promptDocument: promptTextToDocument(job.prompt), duration: job.duration, aspect: job.aspect, samplingProfile, seed, resolution, turbo: isTurboProfile(samplingProfile), loras: job.loras ?? {}, firstFrame, lastFrame } }));
+    setDrafts((current) => ({ ...current, frames: { ...current.frames, prompt: job.prompt, promptDocument: promptTextToDocument(job.prompt), duration: job.duration, aspect: job.aspect, samplingProfile, seed, resolution, turbo: isTurboProfile(samplingProfile), sparseAttention, sparseAttentionBudget, loras, firstFrame, lastFrame } }));
   }, []);
 
   const resetActiveDraft = useCallback(() => {

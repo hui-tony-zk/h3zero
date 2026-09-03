@@ -12,7 +12,7 @@ test("frames request derives geometry from the first uploaded frame", () => {
   const body = buildCreateJobRequest({ mode: "frames", prompt: "move", promptDocument: emptyPromptDocument(), duration: 5, aspect: "16:9", generationCount: 1, turbo: true, firstFrame: frame, lastFrame: null }, specs);
   const config = JSON.parse(String(body.get("config")));
   assert.deepEqual({ width: config.width, height: config.height, source: config.geometry_source }, { width: 864, height: 480, source: "first_frame" });
-  assert.deepEqual({ profile: config.sampling_profile, turbo: config.turbo, seed: config.seed, resolution: config.resolution, steps: config.steps, sampler: config.sampler, scheduler: config.scheduler }, { profile: "turbo_4", turbo: true, seed: null, resolution: "480p", steps: 4, sampler: "res_multistep", scheduler: "simple" });
+  assert.deepEqual({ profile: config.sampling_profile, turbo: config.turbo, sparse: config.sparse_attention, sparseBudget: config.sparse_attention_video_budget, seed: config.seed, resolution: config.resolution, steps: config.steps, sampler: config.sampler, scheduler: config.scheduler }, { profile: "turbo_4", turbo: true, sparse: false, sparseBudget: 0.3, seed: null, resolution: "480p", steps: 4, sampler: "res_multistep", scheduler: "simple" });
   const uploaded = body.get("first_frame") as File;
   assert.deepEqual({ name: uploaded.name, type: uploaded.type, size: uploaded.size }, { name: frame.name, type: frame.type, size: frame.size });
 });
@@ -60,11 +60,18 @@ test("all profile choices retain random-seed 480p production settings", () => {
 
 test("configured LoRA strengths are submitted by id", () => {
   const withLora = { ...specs, output: { ...specs.output, loras: [{
-    id: "pose", name: "Pose", filename: "pose.safetensors", default_enabled: false,
+    id: "pose", aliases: ["pose-v0"], name: "Pose", filename: "pose.safetensors", default_enabled: false,
     default_strength: 1, min_strength: 0, max_strength: 1.5, step: 0.1,
   }] } };
   const body = buildCreateJobRequest({ mode: "frames", prompt: "move", promptDocument: emptyPromptDocument(), duration: 5, aspect: "16:9", generationCount: 1, turbo: true, loras: { pose: 0.8 }, firstFrame: null, lastFrame: null }, withLora);
   assert.deepEqual(JSON.parse(String(body.get("config"))).loras, { pose: 0.8 });
+});
+
+test("sparse attention is submitted as an explicit opt-in", () => {
+  const body = buildCreateJobRequest({ mode: "frames", prompt: "move", promptDocument: emptyPromptDocument(), duration: 5, aspect: "16:9", generationCount: 1, turbo: true, sparseAttention: true, sparseAttentionBudget: 0.1, firstFrame: null, lastFrame: null }, specs);
+  const config = JSON.parse(String(body.get("config")));
+  assert.equal(config.sparse_attention, true);
+  assert.equal(config.sparse_attention_video_budget, 0.1);
 });
 
 test("the client rejects unsupported contracts and statuses", () => {
@@ -86,6 +93,21 @@ test("job status preserves the server sampling timestamp for generation timing",
 test("a deployment without configured LoRAs exposes no mixer entries", () => {
   const { loras: _loras, ...output } = specs.output;
   assert.deepEqual(parseSpecs({ ...specs, output }).output.loras, []);
+});
+
+test("the client normalizes and validates LoRA aliases from specs", () => {
+  const lora = {
+    id: "current", name: "Current", filename: "current.safetensors", default_enabled: false,
+    default_strength: 1, min_strength: 0, max_strength: 1.5, step: 0.1,
+  };
+  const withoutAliases = parseSpecs({ ...specs, output: { ...specs.output, loras: [{ ...lora }] } });
+  assert.deepEqual(withoutAliases.output.loras[0].aliases, []);
+  const withAliases = parseSpecs({ ...specs, output: { ...specs.output, loras: [{ ...lora, aliases: ["legacy"] }] } });
+  assert.deepEqual(withAliases.output.loras[0].aliases, ["legacy"]);
+  assert.throws(
+    () => parseSpecs({ ...specs, output: { ...specs.output, loras: [{ ...lora, aliases: ["Bad Alias"] }] } }),
+    /invalid LoRA aliases/,
+  );
 });
 
 test("deleting an already-missing job succeeds", async () => {

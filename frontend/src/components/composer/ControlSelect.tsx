@@ -2,8 +2,8 @@ import { Check, ChevronDown } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 
-export function ControlSelect<T extends string | number>({ value, label, options, onChange }: {
-  value: T; label: string; options: Array<{ value: T; label: string }>; onChange: (value: T) => void;
+export function ControlSelect<T extends string | number>({ value, label, options, onChange, accent = false }: {
+  value: T; label: string; options: Array<{ value: T; label: string }>; onChange: (value: T) => void; accent?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -32,7 +32,7 @@ export function ControlSelect<T extends string | number>({ value, label, options
   };
 
   return <div ref={root} className="relative">
-    <button ref={trigger} type="button" aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((value) => !value)} onKeyDown={triggerKey} className={`inline-flex h-8 items-center rounded-full border px-3 text-[11px] font-semibold text-reelo-text transition-colors ${open ? "border-reelo-accent/35 bg-white/[0.085]" : "border-white/9 bg-white/[0.045] hover:bg-white/[0.075]"}`}>{label}<ChevronDown size={12} className={`ml-2 text-reelo-dim transition-transform ${open ? "rotate-180 text-reelo-accent" : ""}`} /></button>
+    <button ref={trigger} type="button" aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((value) => !value)} onKeyDown={triggerKey} className={`inline-flex h-8 items-center rounded-full border px-3 text-[11px] font-semibold transition-colors ${open || accent ? "border-reelo-accent/35 bg-reelo-accent/[0.08] text-reelo-accent" : "border-white/9 bg-white/[0.045] text-reelo-text hover:bg-white/[0.075]"}`}>{label}<ChevronDown size={12} className={`ml-2 text-reelo-dim transition-transform ${open ? "rotate-180 text-reelo-accent" : ""}`} /></button>
     <AnimatePresence>{open && <motion.div role="listbox" aria-label={label} initial={{ opacity: 0, y: 5, scale: .98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 4, scale: .98 }} transition={{ duration: .14 }} onKeyDown={menuKey} className="absolute bottom-[calc(100%+8px)] left-0 z-60 max-h-60 min-w-36 overflow-y-auto rounded-[10px] border border-white/10 bg-[#161616]/98 p-1 shadow-[0_12px_34px_rgba(0,0,0,.68)] backdrop-blur-xl">
       {options.map((option, index) => <button ref={(node) => { optionRefs.current[index] = node; }} key={String(option.value)} type="button" role="option" aria-selected={option.value === value} onClick={() => { onChange(option.value); setOpen(false); trigger.current?.focus(); }} className={`flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-[11px] font-semibold ${option.value === value ? "bg-reelo-accent/[0.09] text-reelo-accent" : "text-reelo-text hover:bg-white/[0.06]"}`}>{option.label}<Check size={12} className={option.value === value ? "opacity-100" : "opacity-0"} /></button>)}
     </motion.div>}</AnimatePresence>

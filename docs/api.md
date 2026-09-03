@@ -9,7 +9,12 @@ at four or eight `res_multistep` / `simple` steps, Spectrum at 30 steps, and
 Base at 30 steps. H3Zero submits every profile at 480p with a random seed and
 does not expose resolution or seed controls. `/api/specs` reports the pinned
 files and exact settings. Comfy Kitchen INT8 attention is the global attention
-backend; Spectrum adds transformer forecasting only to the `spectrum` profile.
+backend. Set `sparse_attention` to `true` and choose a
+`sparse_attention_video_budget` of `0.3`, `0.15`, or `0.1`; the conservative
+default is `0.3`. Sparse attention defaults to `false`. Text, reference, audio,
+and boundary attention remain dense. Spectrum adds transformer
+forecasting only to the `spectrum` profile and may be combined with the sparse
+toggle.
 
 Copy the URL printed beside `web =>` after `npm run setup`, then set it for the
 curl examples in your current terminal:
@@ -57,6 +62,9 @@ defaults to `turbo_4`. The production composer always uses a random seed and a
 480p canvas; native 16:9 output is 864×480 and portrait output is 480×864.
 The API accepts any positive integer `steps` value; profile defaults are UI
 choices rather than worker-side restrictions.
+`sparse_attention` is an optional boolean and defaults to `false`.
+`sparse_attention_video_budget` accepts `0.3`, `0.15`, or `0.1` and defaults
+to `0.3`; lower values are faster and more likely to change the result.
 
 ```bash
 curl -X POST "$H3_MODAL_URL/api/jobs" \
@@ -119,7 +127,9 @@ sampling phase.
 A completed result includes dimensions, frames, actual duration, FPS, audio
 metadata, seed, the selected sampling profile and settings, assigned reference
 tags, and `video_url`. LoRA fields are present only for Turbo generations;
-Every completed generation reports its Comfy Kitchen attention version.
+Every completed generation reports its Comfy Kitchen attention version and
+whether sparse attention was enabled. Sparse generations also report the
+implementation version, video-attention budget, and denser-early setting.
 Spectrum generations additionally include their Spectrum settings.
 
 Completed job videos are delivery artifacts, not permanent server storage. The

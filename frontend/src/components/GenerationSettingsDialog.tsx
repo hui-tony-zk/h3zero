@@ -2,10 +2,10 @@ import { motion } from "framer-motion";
 import { SlidersHorizontal, X } from "lucide-react";
 import { useEffect } from "react";
 import { generationSettingSections } from "../lib/generationSettings";
-import type { Job } from "../types";
+import type { H3Specs, Job } from "../types";
 
-export function GenerationSettingsDialog({ job, onClose }: { job: Job; onClose: () => void }) {
-  const sections = generationSettingSections(job);
+export function GenerationSettingsDialog({ job, specs, onClose }: { job: Job; specs: H3Specs | null; onClose: () => void }) {
+  const sections = generationSettingSections(job, specs?.output.attention.sparse.video_budgets);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

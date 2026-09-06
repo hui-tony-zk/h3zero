@@ -147,14 +147,18 @@ test("generation settings expose resolved metadata with the prompt last", () => 
       audio: { native: true, sample_rate_hz: 32000, channels: 2 },
     },
   } as Job;
-  const sections = generationSettingSections(job);
+  const sections = generationSettingSections(job, [
+    { value: 0.3, label: "30% — Balanced" },
+    { value: 0.15, label: "15% — Fast" },
+    { value: 0.1, label: "10% — Fastest" },
+  ]);
   const flat = sections.flatMap((section) => section.items);
   assert.equal(flat.find((entry) => entry.label === "Seed")?.value, "987654");
   assert.equal(flat.find((entry) => entry.label === "Output size")?.value, "768 × 1344");
   assert.equal(flat.find((entry) => entry.label === "Generation time")?.value, "1m 2s · sampling → video ready");
   assert.equal(flat.find((entry) => entry.label === "Attention")?.value, "Comfy Kitchen · v0.2.31");
-  assert.equal(flat.find((entry) => entry.label === "Sparse attention")?.value, "Enabled");
-  assert.equal(flat.find((entry) => entry.label === "Video attention retained")?.value, "30%");
+  assert.equal(flat.find((entry) => entry.label === "Sparse attention")?.value, "30% — Balanced");
+  assert.equal(flat.some((entry) => entry.label === "Video attention retained"), false);
   assert.equal(sections.at(-1)?.title, "Prompt");
   assert.equal(sections.at(-1)?.text, job.prompt);
   const withoutStart = generationSettingSections({ ...job, samplingStartedAt: undefined });

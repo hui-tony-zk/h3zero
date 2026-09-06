@@ -5,7 +5,7 @@ import { groupJobs } from "../lib/jobs";
 import { profileLabel } from "../lib/sampling";
 import { useGeneratedVideoUrl } from "../hooks/useGeneratedVideoUrl";
 import type { ProjectMembership } from "../lib/projects";
-import type { Job } from "../types";
+import type { H3Specs, Job } from "../types";
 import { RemixIcon } from "./icons";
 import { GenerationSettingsDialog } from "./GenerationSettingsDialog";
 
@@ -199,7 +199,7 @@ function ReplacementBanner({ target }: { target: ReplacementTarget }) {
   </motion.div>;
 }
 
-export function JobCanvas({ jobs, projectMemberships, autoplayEnabled, favoritePendingIds, replacementTarget, onFavorite, onProjectAction, onOpenProject, onRemix, onDelete, onCancel }: { jobs: Job[]; projectMemberships: Map<string, ProjectMembership[]>; autoplayEnabled: boolean; favoritePendingIds: Set<string>; replacementTarget?: ReplacementTarget; onFavorite: (job: Job) => void; onProjectAction: (job: Job) => void; onOpenProject: (projectId: string) => void; onRemix: (job: Job) => void; onDelete: (job: Job) => void; onCancel: (job: Job) => void }) {
+export function JobCanvas({ jobs, specs, projectMemberships, autoplayEnabled, favoritePendingIds, replacementTarget, onFavorite, onProjectAction, onOpenProject, onRemix, onDelete, onCancel }: { jobs: Job[]; specs: H3Specs | null; projectMemberships: Map<string, ProjectMembership[]>; autoplayEnabled: boolean; favoritePendingIds: Set<string>; replacementTarget?: ReplacementTarget; onFavorite: (job: Job) => void; onProjectAction: (job: Job) => void; onOpenProject: (projectId: string) => void; onRemix: (job: Job) => void; onDelete: (job: Job) => void; onCancel: (job: Job) => void }) {
   const [viewer, setViewer] = useState<Job | null>(null);
   const [settingsJob, setSettingsJob] = useState<Job | null>(null);
 
@@ -248,7 +248,7 @@ export function JobCanvas({ jobs, projectMemberships, autoplayEnabled, favoriteP
         </div>
       </main>
       <AnimatePresence>{viewer && <FullscreenVideo job={viewer} memberships={projectMemberships.get(viewer.id) ?? []} autoplayEnabled={autoplayEnabled} onPlaybackReady={applyAutoplay} onProjectAction={() => onProjectAction(viewer)} replacementTarget={replacementTarget} onOpenProject={onOpenProject} onClose={() => setViewer(null)} />}</AnimatePresence>
-      <AnimatePresence>{settingsJob && <GenerationSettingsDialog job={settingsJob} onClose={() => setSettingsJob(null)} />}</AnimatePresence>
+      <AnimatePresence>{settingsJob && <GenerationSettingsDialog job={settingsJob} specs={specs} onClose={() => setSettingsJob(null)} />}</AnimatePresence>
     </>
   );
 }

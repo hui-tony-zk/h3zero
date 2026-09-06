@@ -5,12 +5,36 @@ import { parsePromptTaskTypes, PROMPT_TASK_TYPE_NODE, promptTaskTypeText } from 
 
 export const REFERENCE_MENTION_NODE = "referenceMention";
 export const REFERENCE_TOKEN_PATTERN = "<(?:Picture|Video|Audio) \\d+>";
+export const SUBJECT_TOKEN_PATTERN = "<Subject \\d+>";
 
 export function normalizeReferenceToken(value: string) {
   const match = value.match(/^<(picture|video|audio) (\d+)>$/i);
   if (!match) return null;
   const prefix = `${match[1][0].toUpperCase()}${match[1].slice(1).toLowerCase()}`;
   return `<${prefix} ${Number(match[2])}>`;
+}
+
+export function normalizeSubjectToken(value: string) {
+  const match = value.match(/^<subject (\d+)>$/i);
+  return match ? `<Subject ${Number(match[1])}>` : null;
+}
+
+export function subjectTokens(value: string) {
+  const seen = new Set<string>();
+  for (const match of value.matchAll(new RegExp(SUBJECT_TOKEN_PATTERN, "gi"))) {
+    const token = normalizeSubjectToken(match[0]);
+    if (token) seen.add(token);
+  }
+  return [...seen];
+}
+
+export function subjectMention(token: string): JSONContent {
+  const normalized = normalizeSubjectToken(token);
+  if (!normalized) return { type: "text", text: token };
+  return {
+    type: REFERENCE_MENTION_NODE,
+    attrs: { id: normalized, label: normalized, kind: "subject", token: normalized },
+  };
 }
 
 export function emptyPromptDocument(): PromptDocument {
@@ -45,17 +69,20 @@ export function restoreReferenceTokens(value: string, references: MediaAsset[]) 
 
 function textNodes(value: string, references: MediaAsset[]): JSONContent[] {
   const { byToken } = referenceTokenMap(references);
-  const pattern = new RegExp(`${REFERENCE_TOKEN_PATTERN}|\\[(?:reference generation|keyframe completion|video editing|video continuation|audio reuse|audio reference)(?: \\+ (?:reference generation|keyframe completion|video editing|video continuation|audio reuse|audio reference))*\\]`, "gi");
+  const pattern = new RegExp(`${REFERENCE_TOKEN_PATTERN}|${SUBJECT_TOKEN_PATTERN}|\\[(?:reference generation|keyframe completion|video editing|video continuation|audio reuse|audio reference)(?: \\+ (?:reference generation|keyframe completion|video editing|video continuation|audio reuse|audio reference))*\\]`, "gi");
   const nodes: JSONContent[] = [];
   let cursor = 0;
   for (const match of value.matchAll(pattern)) {
     const index = match.index ?? 0;
     if (index > cursor) nodes.push({ type: "text", text: value.slice(cursor, index) });
     const referenceToken = normalizeReferenceToken(match[0]);
+    const subjectToken = normalizeSubjectToken(match[0]);
     const asset = referenceToken ? byToken.get(referenceToken) : undefined;
     const taskTypes = parsePromptTaskTypes(match[0]);
     if (taskTypes) {
       nodes.push({ type: PROMPT_TASK_TYPE_NODE, attrs: { types: taskTypes } });
+    } else if (subjectToken) {
+      nodes.push(subjectMention(subjectToken));
     } else if (asset) {
       nodes.push({
         type: REFERENCE_MENTION_NODE,
@@ -86,7 +113,10 @@ export function promptTextToDocument(value: string, references: MediaAsset[] = [
 
 function nodeText(node: JSONContent, tokens: Map<string, string>): string {
   if (node.type === "text") return node.text ?? "";
-  if (node.type === REFERENCE_MENTION_NODE) return tokens.get(String(node.attrs?.id ?? "")) ?? "";
+  if (node.type === REFERENCE_MENTION_NODE) {
+    if (node.attrs?.kind === "subject") return normalizeSubjectToken(String(node.attrs?.token ?? node.attrs?.id ?? "")) ?? "";
+    return tokens.get(String(node.attrs?.id ?? "")) ?? "";
+  }
   if (node.type === PROMPT_SECTION_NODE) return promptSectionLabel(String(node.attrs?.id ?? ""));
   if (node.type === PROMPT_TASK_TYPE_NODE) return promptTaskTypeText(node.attrs?.types);
   if (node.type === "hardBreak") return "\n";
@@ -140,6 +170,10 @@ export function hydratePromptDocument(document: PromptDocument, references: Medi
   return mapDocument(document, (node) => {
     node = normalizePromptSection(node);
     if (node.type !== REFERENCE_MENTION_NODE) return node;
+    if (node.attrs?.kind === "subject") {
+      const token = normalizeSubjectToken(String(node.attrs?.token ?? node.attrs?.id ?? ""));
+      return token ? { ...node, attrs: { id: token, label: token, kind: "subject", token } } : null;
+    }
     const asset = assets.get(String(node.attrs?.id ?? ""));
     if (!asset) return null;
     return {
@@ -151,7 +185,7 @@ export function hydratePromptDocument(document: PromptDocument, references: Medi
 
 export function replaceReferenceInPromptDocument(document: PromptDocument, replacedId: string, replacement: MediaAsset): PromptDocument {
   return mapDocument(document, (node) => {
-    if (node.type !== REFERENCE_MENTION_NODE || String(node.attrs?.id ?? "") !== replacedId) return node;
+    if (node.type !== REFERENCE_MENTION_NODE || node.attrs?.kind === "subject" || String(node.attrs?.id ?? "") !== replacedId) return node;
     return {
       ...node,
       attrs: {
@@ -168,7 +202,7 @@ export function replaceReferenceInPromptDocument(document: PromptDocument, repla
 export function prunePromptDocument(document: PromptDocument, references: MediaAsset[]): PromptDocument {
   const ids = new Set(references.map((asset) => asset.id));
   return mapDocument(document, (node) => {
-    if (node.type === REFERENCE_MENTION_NODE && !ids.has(String(node.attrs?.id ?? ""))) return null;
+    if (node.type === REFERENCE_MENTION_NODE && node.attrs?.kind !== "subject" && !ids.has(String(node.attrs?.id ?? ""))) return null;
     return node;
   }) ?? emptyPromptDocument();
 }

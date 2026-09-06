@@ -3,14 +3,16 @@ import type { NodeViewProps } from "@tiptap/core";
 import Mention from "@tiptap/extension-mention";
 import { NodeViewWrapper, ReactNodeViewRenderer, ReactRenderer } from "@tiptap/react";
 import type { SuggestionKeyDownProps, SuggestionProps } from "@tiptap/suggestion";
-import { ChevronLeft, FileAudio2, Image as ImageIcon, X } from "lucide-react";
+import { ChevronLeft, FileAudio2, Image as ImageIcon, UserRound, X } from "lucide-react";
 import { forwardRef, useEffect, useImperativeHandle, useState, type MutableRefObject } from "react";
-import { referenceTokenMap, REFERENCE_MENTION_NODE } from "../../lib/promptDocument";
+import { promptDocumentToText, referenceTokenMap, REFERENCE_MENTION_NODE, subjectMention, subjectTokens } from "../../lib/promptDocument";
 import { buildReferenceInsertion, type AnchorKind, type ReferenceRecipe } from "../../lib/promptRecipes";
 import type { GenerationMode, MediaAsset } from "../../types";
 
-type MenuItem = { asset: MediaAsset; token: string };
-type InsertChoice = MenuItem & { recipe: ReferenceRecipe; anchor?: AnchorKind };
+type ReferenceMenuItem = { type: "reference"; asset: MediaAsset; token: string };
+type SubjectMenuItem = { type: "subject"; token: string };
+type MenuItem = ReferenceMenuItem | SubjectMenuItem;
+type InsertChoice = SubjectMenuItem | (ReferenceMenuItem & { recipe: ReferenceRecipe; anchor?: AnchorKind });
 type MenuProps = SuggestionProps<MenuItem, InsertChoice>;
 type MenuHandle = { onKeyDown: (props: SuggestionKeyDownProps) => boolean };
 
@@ -45,7 +47,7 @@ function Visual({ asset, className = "size-7" }: { asset: Pick<MediaAsset, "kind
 
 const Menu = forwardRef<MenuHandle, MenuProps>(function Menu(props, ref) {
   const [selected, setSelected] = useState(0);
-  const [pending, setPending] = useState<MenuItem | null>(null);
+  const [pending, setPending] = useState<ReferenceMenuItem | null>(null);
   const [choosingAnchor, setChoosingAnchor] = useState(false);
   useEffect(() => { setSelected(0); setPending(null); setChoosingAnchor(false); }, [props.items, props.query]);
 
@@ -60,6 +62,7 @@ const Menu = forwardRef<MenuHandle, MenuProps>(function Menu(props, ref) {
     if (!pending) {
       const item = props.items[index];
       if (!item) return;
+      if (item.type === "subject") { props.command(item); return; }
       if (item.asset.kind === "audio") props.command({ ...item, recipe: "reference" });
       else { setPending(item); setSelected(0); }
       return;
@@ -81,8 +84,8 @@ const Menu = forwardRef<MenuHandle, MenuProps>(function Menu(props, ref) {
     if (event.key === "Enter") { event.preventDefault(); choose(selected); return true; }
     return false;
   } }), [optionCount, pending, choosingAnchor, props.items, selected]);
-  if (!props.items.length) return <div className="rounded-xl border border-white/10 bg-[#202020] px-3 py-2.5 text-[11px] text-reelo-dim shadow-2xl">No matching attachments</div>;
-  if (!pending) return <div role="listbox" aria-label="Reference attachments" className="w-[300px] overflow-hidden rounded-xl border border-white/10 bg-[#202020] p-1.5 shadow-[0_18px_50px_rgba(0,0,0,.65)]">{props.items.map((item, index) => <button key={item.asset.id} type="button" role="option" aria-label={`${item.token} reference`} aria-selected={index === selected} onMouseDown={(event) => { event.preventDefault(); choose(index); }} onMouseEnter={() => setSelected(index)} className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left ${index === selected ? "bg-reelo-accent/12" : "hover:bg-white/5"}`}><Visual asset={item.asset} /><span className="font-mono text-[10px] font-semibold text-reelo-accent">{item.token}</span></button>)}</div>;
+  if (!props.items.length) return <div className="rounded-xl border border-white/10 bg-[#202020] px-3 py-2.5 text-[11px] text-reelo-dim shadow-2xl">No matching subjects or attachments</div>;
+  if (!pending) return <div role="listbox" aria-label="Subjects and reference attachments" className="w-[300px] overflow-hidden rounded-xl border border-white/10 bg-[#202020] p-1.5 shadow-[0_18px_50px_rgba(0,0,0,.65)]">{props.items.map((item, index) => <button key={item.type === "subject" ? item.token : item.asset.id} type="button" role="option" aria-label={`${item.token} ${item.type}`} aria-selected={index === selected} onMouseDown={(event) => { event.preventDefault(); choose(index); }} onMouseEnter={() => setSelected(index)} className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left ${index === selected ? "bg-reelo-accent/12" : "hover:bg-white/5"}`}>{item.type === "subject" ? <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-reelo-accent/10 text-reelo-accent"><UserRound size={13} /></span> : <Visual asset={item.asset} />}<span className="font-mono text-[10px] font-semibold text-reelo-accent">{item.token}</span></button>)}</div>;
 
   return <div role="listbox" aria-label={choosingAnchor ? "Choose shot anchor" : `Insert ${pending.token} as`} className="w-[350px] overflow-hidden rounded-xl border border-white/10 bg-[#202020] p-1.5 shadow-[0_18px_50px_rgba(0,0,0,.65)]">
     <div className="flex items-center gap-2 px-1.5 py-1.5"><button type="button" onMouseDown={(event) => { event.preventDefault(); back(); }} className="flex size-7 items-center justify-center rounded-lg text-reelo-dim hover:bg-white/6 hover:text-reelo-text" aria-label="Back"><ChevronLeft size={14} /></button><Visual asset={pending.asset} /><span className="font-mono text-[10px] font-semibold text-reelo-accent">{pending.token}</span></div>
@@ -92,9 +95,10 @@ const Menu = forwardRef<MenuHandle, MenuProps>(function Menu(props, ref) {
 });
 
 function Chip({ node, deleteNode }: NodeViewProps) {
+  const isSubject = node.attrs.kind === "subject";
   const asset = { id: String(node.attrs.id ?? ""), name: String(node.attrs.label ?? "Reference"), kind: node.attrs.kind === "video" || node.attrs.kind === "audio" ? node.attrs.kind : "image", previewUrl: String(node.attrs.previewUrl ?? "") } as const;
   const token = String(node.attrs.token ?? "");
-  return <NodeViewWrapper as="span" className="h3-reference-mention" data-reference-id={asset.id} data-reference-token={token}>{(asset.kind === "image" || asset.kind === "video") && asset.previewUrl ? <Visual asset={asset} className="size-5" /> : asset.kind === "audio" ? <FileAudio2 size={12} /> : <ImageIcon size={12} />}{token && <span className="font-mono text-reelo-accent/75">{token}</span>}<button type="button" contentEditable={false} onMouseDown={(event) => event.preventDefault()} onClick={deleteNode} className="ml-0.5 flex size-4 items-center justify-center rounded-full text-white/38 hover:bg-white/10 hover:text-white" aria-label={`Remove mention ${asset.name}`}><X size={10} /></button></NodeViewWrapper>;
+  return <NodeViewWrapper as="span" className="h3-reference-mention" data-reference-id={isSubject ? undefined : asset.id} data-reference-token={token}>{isSubject ? <UserRound size={12} /> : (asset.kind === "image" || asset.kind === "video") && asset.previewUrl ? <Visual asset={asset} className="size-5" /> : asset.kind === "audio" ? <FileAudio2 size={12} /> : <ImageIcon size={12} />}{token && <span className="font-mono text-reelo-accent/75">{token}</span>}<button type="button" contentEditable={false} onMouseDown={(event) => event.preventDefault()} onClick={deleteNode} className="ml-0.5 flex size-4 items-center justify-center rounded-full text-white/38 hover:bg-white/10 hover:text-white" aria-label={`Remove mention ${token || asset.name}`}><X size={10} /></button></NodeViewWrapper>;
 }
 
 export function createReferenceMention(assets: MutableRefObject<MediaAsset[]>, mode: MutableRefObject<GenerationMode>) {
@@ -107,14 +111,22 @@ export function createReferenceMention(assets: MutableRefObject<MediaAsset[]>, m
     renderText: ({ node }) => String(node.attrs.token ?? node.attrs.label ?? "Reference"),
     suggestion: {
       char: "@", placement: "top-start", offset: { mainAxis: 8 }, floatingUi: { middleware: [shift({ padding: 12 })] },
-      allow: () => mode.current === "references" && assets.current.length > 0,
-      items: ({ query }) => {
+      allow: () => mode.current === "references",
+      items: ({ query, editor }) => {
         const normalized = query.trim().toLowerCase(); const { byId } = referenceTokenMap(assets.current);
-        return assets.current.map((asset) => ({ asset, token: byId.get(asset.id) ?? "" })).filter((item) => !normalized || item.asset.name.toLowerCase().includes(normalized) || item.token.toLowerCase().includes(normalized));
+        const subjects = subjectTokens(promptDocumentToText(editor.getJSON(), assets.current)).map((token): SubjectMenuItem => ({ type: "subject", token }));
+        const references = assets.current.map((asset): ReferenceMenuItem => ({ type: "reference", asset, token: byId.get(asset.id) ?? "" }));
+        return [...subjects, ...references].filter((item) => !normalized || item.token.toLowerCase().includes(normalized) || (item.type === "subject" ? "subject".includes(normalized) : item.asset.name.toLowerCase().includes(normalized)));
       },
       command: ({ editor, range, props }) => {
         const item = props as unknown as InsertChoice;
-        editor.chain().focus().insertContentAt(range, buildReferenceInsertion({ ...item, promptText: editor.getText() })).run();
+        const content = item.type === "subject"
+          ? subjectMention(item.token)
+          : buildReferenceInsertion({
+              ...item,
+              promptText: promptDocumentToText(editor.getJSON(), assets.current),
+            });
+        editor.chain().focus().insertContentAt(range, content).run();
       },
       render: () => {
         let component: ReactRenderer<MenuHandle, MenuProps> | null = null; let unmount: (() => void) | null = null;

@@ -207,6 +207,15 @@ test("stored reference tokens hydrate without case sensitivity", () => {
   assert.equal(promptDocumentToText(document, references), "Follow <Picture 1> then <Picture 1>");
 });
 
+test("subject tokens hydrate as reusable inline mentions and survive reference pruning", () => {
+  const document = promptTextToDocument("<subject 1> enters. Follow <SUBJECT 1>.");
+  const mentions = document.content?.[0]?.content?.filter((node) => node.type === "referenceMention") ?? [];
+  assert.equal(mentions.length, 2);
+  assert.deepEqual(mentions[0]?.attrs, { id: "<Subject 1>", label: "<Subject 1>", kind: "subject", token: "<Subject 1>" });
+  assert.equal(promptDocumentToText(document), "<Subject 1> enters. Follow <Subject 1>.");
+  assert.equal(promptDocumentToText(prunePromptDocument(document, [])), "<Subject 1> enters. Follow <Subject 1>.");
+});
+
 test("reused prompts restore leaked attachment labels and IDs to reference tokens", () => {
   const references = [asset("reelo-91732892"), asset("voice", "audio")];
   assert.equal(
@@ -240,6 +249,7 @@ test("subject and anchor recipes continue existing numbering", () => {
   const subject = buildReferenceInsertion({ asset: reference, token: "<Picture 1>", recipe: "subject", promptText: "<Subject 3>" });
   const anchor = buildReferenceInsertion({ asset: reference, token: "<Picture 1>", recipe: "anchor", anchor: "last frame", promptText: "[Shot 2]" });
   assert.equal(promptDocumentToText({ type: "doc", content: [{ type: "paragraph", content: subject }] }, [reference]), "<Subject 4> is the main visible subject shown in <Picture 1>. Preserve its defining identity and appearance. ");
+  assert.deepEqual(subject[0]?.attrs, { id: "<Subject 4>", label: "<Subject 4>", kind: "subject", token: "<Subject 4>" });
   assert.equal(promptDocumentToText({ type: "doc", content: [{ type: "paragraph", content: anchor }] }, [reference]), "<Picture 1> is the last frame of [Shot 3], showing the composition in the reference image. ");
 });
 

@@ -1,6 +1,6 @@
 import type { JSONContent } from "@tiptap/core";
 import type { MediaAsset } from "../types";
-import { REFERENCE_MENTION_NODE } from "./promptDocument";
+import { REFERENCE_MENTION_NODE, subjectMention } from "./promptDocument";
 
 export type ReferenceRecipe = "reference" | "as-is" | "subject" | "storyboard" | "anchor" | "video-source" | "video-continuation" | "video-structure";
 export type AnchorKind = "first frame" | "keyframe" | "last frame" | "composition anchor";
@@ -34,7 +34,8 @@ export function buildReferenceInsertion({ asset, token, recipe, anchor = "compos
   if (recipe === "subject") {
     const subject = nextNumber(promptText, /<Subject (\d+)>/g);
     return [
-      { type: "text", text: `<Subject ${subject}> is the main visible subject shown in ` },
+      subjectMention(`<Subject ${subject}>`),
+      { type: "text", text: " is the main visible subject shown in " },
       reference,
       { type: "text", text: ". Preserve its defining identity and appearance. " },
     ];

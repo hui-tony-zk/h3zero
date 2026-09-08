@@ -6,14 +6,7 @@ import copy
 import math
 
 from minimax_h3.loras import public_loras
-from minimax_h3.runtime import (
-    ATTENTION_BACKEND,
-    COMFY_KITCHEN_VERSION,
-    SPARSE_ATTENTION_DENSER_EARLY,
-    SPARSE_ATTENTION_IMPLEMENTATION,
-    SPARSE_ATTENTION_VERSION,
-    SPARSE_ATTENTION_VIDEO_BUDGET,
-)
+from minimax_h3.runtime import ATTENTION_BACKEND, COMFY_KITCHEN_VERSION
 
 FPS = 24
 CANVAS_MULTIPLE = 32
@@ -297,19 +290,6 @@ _SPECS = {
             "backend": ATTENTION_BACKEND,
             "version": COMFY_KITCHEN_VERSION,
             "scope": "global",
-            "sparse": {
-                "available": True,
-                "default": False,
-                "implementation": SPARSE_ATTENTION_IMPLEMENTATION,
-                "version": SPARSE_ATTENTION_VERSION,
-                "video_budget": SPARSE_ATTENTION_VIDEO_BUDGET,
-                "video_budgets": [
-                    {"value": 0.30, "label": "30% — Balanced"},
-                    {"value": 0.15, "label": "15% — Fast"},
-                    {"value": 0.10, "label": "10% — Fastest"},
-                ],
-                "denser_early": SPARSE_ATTENTION_DENSER_EARLY,
-            },
         },
         "loras": public_loras(),
         "sampling": {

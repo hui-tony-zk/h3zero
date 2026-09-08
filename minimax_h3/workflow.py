@@ -6,11 +6,6 @@ import json
 
 from minimax_h3.loras import CONFIGURED_LORAS, resolve_lora_strengths
 from minimax_h3.media import image_dimensions, image_suffix
-from minimax_h3.runtime import (
-    SPARSE_ATTENTION_DENSER_EARLY,
-    SPARSE_ATTENTION_VIDEO_BUDGET,
-    SPARSE_ATTENTION_VIDEO_BUDGETS,
-)
 from minimax_h3.specs import (
     FPS,
     MAX_IMAGE_BYTES,
@@ -95,8 +90,6 @@ def _common_workflow(
     output_stem: str,
     sampling_profile: str,
     loras: dict[str, float],
-    sparse_attention: bool,
-    sparse_attention_video_budget: float,
 ) -> dict:
     _, profile = resolve_sampling_profile(sampling_profile)
     model_reference = ["model", 0]
@@ -126,16 +119,6 @@ def _common_workflow(
             },
         }
         model_reference = [node_id, 0]
-    if sparse_attention:
-        accelerator_nodes["sparse_attention"] = {
-            "class_type": "H3SparseAttention",
-            "inputs": {
-                "model": model_reference,
-                "video_budget": sparse_attention_video_budget,
-                "denser_early_late_steps": SPARSE_ATTENTION_DENSER_EARLY,
-            },
-        }
-        model_reference = ["sparse_attention", 0]
     if profile["spectrum"]:
         accelerator_nodes["spectrum"] = {
             "class_type": "SpectrumApplyMiniMaxH3",
@@ -266,20 +249,11 @@ def build_frames_workflow(
     sampler: str | None = None,
     scheduler: str | None = None,
     loras: dict[str, float] | None = None,
-    sparse_attention: bool = False,
-    sparse_attention_video_budget: float = SPARSE_ATTENTION_VIDEO_BUDGET,
     output_stem: str = "h3",
     first_frame_filename: str | None = None,
     last_frame_filename: str | None = None,
     resolution: str = "480p",
 ) -> dict:
-    if not isinstance(sparse_attention, bool):
-        raise ValueError("sparse_attention must be a boolean")
-    if (
-        isinstance(sparse_attention_video_budget, bool)
-        or sparse_attention_video_budget not in SPARSE_ATTENTION_VIDEO_BUDGETS
-    ):
-        raise ValueError("sparse_attention_video_budget must be 0.1, 0.15, or 0.3")
     profile_id, profile = resolve_sampling_profile(sampling_profile, turbo=turbo)
     steps = steps if steps is not None else profile["steps"]["default"]
     sampler = sampler or profile["sampler"]
@@ -317,8 +291,6 @@ def build_frames_workflow(
         output_stem=output_stem,
         sampling_profile=profile_id,
         loras=loras,
-        sparse_attention=sparse_attention,
-        sparse_attention_video_budget=sparse_attention_video_budget,
     )
     for label, filename in (
         ("first_frame", first_frame_filename),
@@ -350,18 +322,9 @@ def build_reference_workflow(
     sampler: str | None = None,
     scheduler: str | None = None,
     loras: dict[str, float] | None = None,
-    sparse_attention: bool = False,
-    sparse_attention_video_budget: float = SPARSE_ATTENTION_VIDEO_BUDGET,
     output_stem: str = "h3",
     resolution: str = "480p",
 ) -> dict:
-    if not isinstance(sparse_attention, bool):
-        raise ValueError("sparse_attention must be a boolean")
-    if (
-        isinstance(sparse_attention_video_budget, bool)
-        or sparse_attention_video_budget not in SPARSE_ATTENTION_VIDEO_BUDGETS
-    ):
-        raise ValueError("sparse_attention_video_budget must be 0.1, 0.15, or 0.3")
     profile_id, profile = resolve_sampling_profile(sampling_profile, turbo=turbo)
     steps = steps if steps is not None else profile["steps"]["default"]
     sampler = sampler or profile["sampler"]
@@ -405,8 +368,6 @@ def build_reference_workflow(
         output_stem=output_stem,
         sampling_profile=profile_id,
         loras=loras,
-        sparse_attention=sparse_attention,
-        sparse_attention_video_budget=sparse_attention_video_budget,
     )
 
     for index, reference in enumerate(references):

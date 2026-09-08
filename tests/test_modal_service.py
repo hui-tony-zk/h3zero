@@ -48,11 +48,6 @@ class ModalServiceDefinitionTests(unittest.TestCase):
             source,
         )
         self.assertIn("ComfyUI-Spectrum-MiniMax-H3", source)
-        self.assertIn(
-            'H3_OPTIMIZATIONS_COMMIT = "379f9c7922b3d7831dd93ae069ba0cb82cb4cf36"',
-            source,
-        )
-        self.assertIn("Zironic/H3-Optimizations", source)
         self.assertNotIn("SageAttention", source)
         self.assertIn('"loras",', source)
 

@@ -52,8 +52,7 @@ export function parseSpecs(value: unknown): H3Specs {
   record(modes.frames);
   record(modes.references);
   const output = record(source.output);
-  const attention = record(output.attention);
-  record(attention.sparse);
+  record(output.attention);
   if (output.loras === undefined) output.loras = [];
   if (!Array.isArray(output.loras)) throw new Error("The H3 API returned an invalid LoRA catalog.");
   const loraIds = new Set<string>();

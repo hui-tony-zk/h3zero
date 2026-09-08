@@ -110,67 +110,6 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(spectrum["scheduler"]["inputs"]["steps"], 30)
         self.assertEqual(spectrum["scheduler"]["inputs"]["model"], ["spectrum", 0])
 
-    def test_sparse_attention_is_opt_in_and_precedes_spectrum(self):
-        dense = build_frames_workflow(
-            prompt="Dense baseline.",
-            width=864,
-            height=480,
-            duration_seconds=5,
-            seed=42,
-        )
-        self.assertNotIn("sparse_attention", dense)
-
-        sparse = build_frames_workflow(
-            prompt="Sparse preview.",
-            width=864,
-            height=480,
-            duration_seconds=5,
-            seed=42,
-            sampling_profile="spectrum",
-            sparse_attention=True,
-        )
-        self.assertEqual(sparse["sparse_attention"], {
-            "class_type": "H3SparseAttention",
-            "inputs": {
-                "model": ["model", 0],
-                "video_budget": 0.3,
-                "denser_early_late_steps": True,
-            },
-        })
-        self.assertEqual(sparse["spectrum"]["inputs"]["model"], ["sparse_attention", 0])
-        self.assertEqual(sparse["scheduler"]["inputs"]["model"], ["spectrum", 0])
-
-        fastest = build_frames_workflow(
-            prompt="Fastest sparse preview.",
-            width=864,
-            height=480,
-            duration_seconds=5,
-            seed=42,
-            sparse_attention=True,
-            sparse_attention_video_budget=0.1,
-        )
-        self.assertEqual(fastest["sparse_attention"]["inputs"]["video_budget"], 0.1)
-
-        with self.assertRaisesRegex(ValueError, "sparse_attention must be a boolean"):
-            build_frames_workflow(
-                prompt="Invalid sparse value.",
-                width=864,
-                height=480,
-                duration_seconds=5,
-                seed=42,
-                sparse_attention="yes",
-            )
-        with self.assertRaisesRegex(ValueError, "must be 0.1, 0.15, or 0.3"):
-            build_frames_workflow(
-                prompt="Unsupported sparse budget.",
-                width=864,
-                height=480,
-                duration_seconds=5,
-                seed=42,
-                sparse_attention=True,
-                sparse_attention_video_budget=0.2,
-            )
-
     def test_rejects_oversized_canvas(self):
         with self.assertRaisesRegex(ValueError, "must not exceed"):
             build_frames_workflow(

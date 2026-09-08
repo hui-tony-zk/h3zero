@@ -12,7 +12,7 @@ export const specs: H3Specs = {
     } },
   },
   output: {
-    attention: { backend: "comfy_kitchen", version: "0.2.31", scope: "global", sparse: { available: true, default: false, implementation: "h3_optimizations", version: "0.2.41", video_budget: 0.3, video_budgets: [{ value: 0.3, label: "30% — Balanced" }, { value: 0.15, label: "15% — Fast" }, { value: 0.1, label: "10% — Fastest" }], denser_early: true } },
+    attention: { backend: "comfy_kitchen", version: "0.2.31", scope: "global" },
     loras: [],
     sampling: { default: "turbo_4", profiles: {
       turbo_4: { label: "Turbo · 4 steps", method: "LightX2V MiniMax-H3 Turbo 4-step LoRA", lora: "minimax_h3_fl2v_turbo_4step_v1.1_768p_comfyui_bf16.safetensors", preview: true, steps: { default: 4, min: 4, max: 4 }, sampler: "res_multistep", scheduler: "simple", lora_strength: 1, spectrum: false, turbo: true, low_vram: null },

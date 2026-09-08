@@ -12,7 +12,7 @@ test("frames request derives geometry from the first uploaded frame", () => {
   const body = buildCreateJobRequest({ mode: "frames", prompt: "move", promptDocument: emptyPromptDocument(), duration: 5, aspect: "16:9", generationCount: 1, turbo: true, firstFrame: frame, lastFrame: null }, specs);
   const config = JSON.parse(String(body.get("config")));
   assert.deepEqual({ width: config.width, height: config.height, source: config.geometry_source }, { width: 864, height: 480, source: "first_frame" });
-  assert.deepEqual({ profile: config.sampling_profile, turbo: config.turbo, sparse: config.sparse_attention, sparseBudget: config.sparse_attention_video_budget, seed: config.seed, resolution: config.resolution, steps: config.steps, sampler: config.sampler, scheduler: config.scheduler }, { profile: "turbo_4", turbo: true, sparse: false, sparseBudget: 0.3, seed: null, resolution: "480p", steps: 4, sampler: "res_multistep", scheduler: "simple" });
+  assert.deepEqual({ profile: config.sampling_profile, turbo: config.turbo, seed: config.seed, resolution: config.resolution, steps: config.steps, sampler: config.sampler, scheduler: config.scheduler }, { profile: "turbo_4", turbo: true, seed: null, resolution: "480p", steps: 4, sampler: "res_multistep", scheduler: "simple" });
   const uploaded = body.get("first_frame") as File;
   assert.deepEqual({ name: uploaded.name, type: uploaded.type, size: uploaded.size }, { name: frame.name, type: frame.type, size: frame.size });
 });
@@ -65,13 +65,6 @@ test("configured LoRA strengths are submitted by id", () => {
   }] } };
   const body = buildCreateJobRequest({ mode: "frames", prompt: "move", promptDocument: emptyPromptDocument(), duration: 5, aspect: "16:9", generationCount: 1, turbo: true, loras: { pose: 0.8 }, firstFrame: null, lastFrame: null }, withLora);
   assert.deepEqual(JSON.parse(String(body.get("config"))).loras, { pose: 0.8 });
-});
-
-test("sparse attention is submitted as an explicit opt-in", () => {
-  const body = buildCreateJobRequest({ mode: "frames", prompt: "move", promptDocument: emptyPromptDocument(), duration: 5, aspect: "16:9", generationCount: 1, turbo: true, sparseAttention: true, sparseAttentionBudget: 0.1, firstFrame: null, lastFrame: null }, specs);
-  const config = JSON.parse(String(body.get("config")));
-  assert.equal(config.sparse_attention, true);
-  assert.equal(config.sparse_attention_video_budget, 0.1);
 });
 
 test("the client rejects unsupported contracts and statuses", () => {

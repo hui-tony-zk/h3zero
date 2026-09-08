@@ -47,24 +47,7 @@ class SpecsTests(unittest.TestCase):
         self.assertEqual(spectrum["steps"], {"default": 30, "min": 30, "max": 30})
         self.assertEqual(
             specs["output"]["attention"],
-            {
-                "backend": "comfy_kitchen",
-                "version": "0.2.31",
-                "scope": "global",
-                "sparse": {
-                    "available": True,
-                    "default": False,
-                    "implementation": "h3_optimizations",
-                    "version": "0.2.41",
-                    "video_budget": 0.3,
-                    "video_budgets": [
-                        {"value": 0.3, "label": "30% — Balanced"},
-                        {"value": 0.15, "label": "15% — Fast"},
-                        {"value": 0.1, "label": "10% — Fastest"},
-                    ],
-                    "denser_early": True,
-                },
-            },
+            {"backend": "comfy_kitchen", "version": "0.2.31", "scope": "global"},
         )
         self.assertEqual(
             specs["output"]["seed"]["options"],

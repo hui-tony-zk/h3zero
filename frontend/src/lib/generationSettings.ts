@@ -1,5 +1,4 @@
 import { profileLabel } from "./sampling";
-import { sparseAttentionLabel, type SparseAttentionPreset } from "./sparseAttention";
 import type { Job, SamplingProfileId } from "../types";
 
 export type GenerationSetting = { label: string; value: string };
@@ -45,7 +44,7 @@ function inputLabel(job: Job) {
   return "Text only";
 }
 
-export function generationSettingSections(job: Job, sparsePresets: SparseAttentionPreset[] = []): GenerationSettingSection[] {
+export function generationSettingSections(job: Job): GenerationSettingSection[] {
   const metadata = job.metadata;
   const profile = metadata?.sampling_profile ?? job.samplingProfile ?? (job.turbo ? "turbo_4" : "spectrum");
   const seed = metadata?.seed ?? job.seed ?? "random";
@@ -62,8 +61,6 @@ export function generationSettingSections(job: Job, sparsePresets: SparseAttenti
     && job.finishedAt >= job.samplingStartedAt
     ? `${elapsedLabel(job.finishedAt - job.samplingStartedAt)} · sampling → ${job.status === "completed" ? "video ready" : "stopped"}`
     : undefined;
-  const sparseEnabled = metadata?.attention?.sparse ?? job.sparseAttention ?? false;
-  const sparseBudget = metadata?.sparse_attention?.video_budget ?? job.sparseAttentionBudget ?? 0.3;
 
   const overview: GenerationSetting[] = [
     ...item("Generation ID", job.id),
@@ -100,9 +97,6 @@ export function generationSettingSections(job: Job, sparsePresets: SparseAttenti
 
   const acceleration: GenerationSetting[] = [
     ...item("Attention", metadata?.attention ? `Comfy Kitchen · v${metadata.attention.version}` : undefined),
-    ...item("Sparse attention", sparseAttentionLabel(sparseEnabled, sparseBudget, sparsePresets)),
-    ...item("Sparse implementation", metadata?.sparse_attention ? `${metadata.sparse_attention.implementation} · v${metadata.sparse_attention.version}` : undefined),
-    ...item("Denser early ramp", metadata?.sparse_attention ? (metadata.sparse_attention.denser_early ? "Enabled" : "Disabled") : undefined),
     ...item("Turbo LoRA", metadata?.lora),
     ...item("Turbo LoRA strength", metadata?.lora_strength),
     ...item("Spectrum", metadata?.spectrum ? `v${metadata.spectrum.version}` : undefined),

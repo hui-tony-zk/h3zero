@@ -42,7 +42,6 @@ from minimax_h3.specs import (
 )
 from minimax_h3.loras import resolve_lora_strengths
 from minimax_h3.workflow import validate_generation, validate_image_bytes
-from minimax_h3.runtime import SPARSE_ATTENTION_VIDEO_BUDGET, SPARSE_ATTENTION_VIDEO_BUDGETS
 from modal_services import favorites, jobs, project_exports
 
 DEFAULT_CONFIG = {
@@ -61,8 +60,6 @@ DEFAULT_CONFIG = {
     "ref_image_size": "match",
     "references": [],
     "loras": None,
-    "sparse_attention": False,
-    "sparse_attention_video_budget": SPARSE_ATTENTION_VIDEO_BUDGET,
 }
 CONFIG_FIELDS = set(DEFAULT_CONFIG)
 REFERENCE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -130,13 +127,6 @@ def parse_config(prompt: str, raw: str | None) -> dict:
         raise ValueError("mode must be 'frames' or 'references'")
     if "turbo" in supplied and not isinstance(config["turbo"], bool):
         raise ValueError("turbo must be a boolean")
-    if not isinstance(config["sparse_attention"], bool):
-        raise ValueError("sparse_attention must be a boolean")
-    if (
-        isinstance(config["sparse_attention_video_budget"], bool)
-        or config["sparse_attention_video_budget"] not in SPARSE_ATTENTION_VIDEO_BUDGETS
-    ):
-        raise ValueError("sparse_attention_video_budget must be 0.1, 0.15, or 0.3")
     profile_id, profile = resolve_sampling_profile(
         supplied.get("sampling_profile"),
         turbo=config["turbo"],
@@ -961,13 +951,6 @@ def create_gateway(
                 ),
                 "seed": request_data.get("seed", client_job.get("seed")),
                 "resolution": request_data.get("resolution", client_job.get("resolution", "480p")),
-                "sparseAttention": request_data.get(
-                    "sparse_attention", client_job.get("sparseAttention", False)
-                ),
-                "sparseAttentionBudget": request_data.get(
-                    "sparse_attention_video_budget",
-                    client_job.get("sparseAttentionBudget", SPARSE_ATTENTION_VIDEO_BUDGET),
-                ),
                 "loras": _lora_strengths_from_metadata(result_data),
                 "contentUrl": favorites.video_url(username, job_id),
                 "metadata": result_data,

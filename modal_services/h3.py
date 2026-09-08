@@ -17,7 +17,6 @@ from minimax_h3.config import (
     WEB_APP_NAME,
 )
 from minimax_h3.specs import resolve_sampling_profile
-from minimax_h3.runtime import SPARSE_ATTENTION_VIDEO_BUDGET
 from minimax_h3.workflow import validate_image_bytes
 from modal_services import jobs, project_exports
 
@@ -181,8 +180,6 @@ def main(
     steps: int = 0,
     sampler: str = "",
     scheduler: str = "",
-    sparse_attention: bool = False,
-    sparse_attention_video_budget: float = SPARSE_ATTENTION_VIDEO_BUDGET,
     first_frame: str = "",
     last_frame: str = "",
 ) -> None:
@@ -204,8 +201,6 @@ def main(
         steps=steps or profile["steps"]["default"],
         sampler=sampler or profile["sampler"],
         scheduler=scheduler or profile["scheduler"],
-        sparse_attention=sparse_attention,
-        sparse_attention_video_budget=sparse_attention_video_budget,
         first_frame=_read_keyframe(first_frame, "first"),
         last_frame=_read_keyframe(last_frame, "last"),
     )

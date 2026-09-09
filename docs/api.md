@@ -95,6 +95,17 @@ tokens automatically.
 
 ### Reference limits
 
+To reuse a cloud favorite's source file, include
+`"favorite": {"username": "alice", "asset_id": "saved-asset-id"}` in its
+reference declaration and omit that reference's multipart file. Saved and
+uploaded references can be mixed in the same request. The gateway validates
+and copies the saved source into job-owned temporary storage; job cleanup
+does not delete the favorite. Missing saved sources return `409` before any
+GPU work is submitted, allowing clients to retry with local file uploads.
+H3Zero automatically reuses matching asset IDs from the current cloud-sync
+username's favorites and falls back to local uploads if they are unavailable.
+Selecting the same file again creates a new asset ID and uploads it normally.
+
 - Up to 9 images, 3 videos, 3 standalone audio clips, and 12 files total.
 - Video and audio clips must each be 2–15 seconds.
 - Total video duration and total standalone audio duration are each limited to

@@ -27,6 +27,16 @@ test("references request preserves upload order", () => {
   ]);
 });
 
+test("saved references omit upload bytes while new references still upload", () => {
+  const first = asset("first", "image", 1); const second = asset("second", "video", 2);
+  const body = buildCreateJobRequest({ mode: "references", prompt: "use both", promptDocument: emptyPromptDocument(), duration: 5, aspect: "16:9", generationCount: 1, turbo: true, references: [first, second] }, specs, new Map([[first.id, "alice"]]));
+  const config = JSON.parse(String(body.get("config")));
+  assert.deepEqual(config.references[0].favorite, { username: "alice", asset_id: "first" });
+  assert.equal(body.has("attachment_0"), false);
+  assert.equal((body.get("attachment_1") as File).size, second.size);
+  assert.equal(config.references[1].favorite, undefined);
+});
+
 test("reused reference labels submit as H3 picture tags", () => {
   const reference = asset("reelo-91732892");
   const prompt = restoreReferenceTokens("Animate reelo-91732892.png", [reference]);

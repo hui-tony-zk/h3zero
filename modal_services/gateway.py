@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
+from starlette.datastructures import Headers, UploadFile
 
 from minimax_h3 import media
 from minimax_h3.specs import (
@@ -254,6 +255,10 @@ def _kind_for_mime(content_type: str) -> str | None:
     return None
 
 
+class FavoriteReferenceMissing(ValueError):
+    pass
+
+
 def _validate_reference_declarations(declarations: list[dict]) -> None:
     if not declarations:
         raise ValueError("references mode requires at least one attachment")
@@ -265,7 +270,7 @@ def _validate_reference_declarations(declarations: list[dict]) -> None:
     for index, entry in enumerate(declarations):
         if not isinstance(entry, dict):
             raise ValueError(f"reference {index} must be an object")
-        unknown = set(entry) - {"id", "kind", "field", "use_audio"}
+        unknown = set(entry) - {"id", "kind", "field", "use_audio", "favorite"}
         if unknown:
             raise ValueError(f"reference {index} has unknown fields: {sorted(unknown)}")
         reference_id = entry.get("id") or f"reference-{index + 1}"
@@ -284,6 +289,14 @@ def _validate_reference_declarations(declarations: list[dict]) -> None:
             raise ValueError("reference multipart fields must be non-empty and unique")
         fields.add(field)
         entry["field"] = field
+        if "favorite" in entry:
+            source = entry["favorite"]
+            if not isinstance(source, dict) or set(source) != {"username", "asset_id"}:
+                raise ValueError("favorite must contain username and asset_id")
+            if not all(isinstance(value, str) for value in source.values()):
+                raise ValueError("favorite username and asset_id must be strings")
+            favorites.normalize_username(source["username"])
+            favorites.validate_asset_id(source["asset_id"])
         use_audio = entry.get("use_audio", False)
         if not isinstance(use_audio, bool):
             raise ValueError(f"reference {index} use_audio must be a boolean")
@@ -348,6 +361,25 @@ async def _stage_references(
     audio_total = 0.0
     for index, declaration in enumerate(declarations):
         upload = form.get(declaration["field"])
+        if "favorite" in declaration:
+            if upload is not None:
+                raise ValueError("reference cannot include both a favorite and an upload")
+            source = declaration["favorite"]
+            saved = next((
+                asset
+                for record in favorites.list_favorites(source["username"], root)
+                for asset in record.get("favoriteAssets", [])
+                if asset.get("id") == source["asset_id"]
+            ), None)
+            if saved is None:
+                raise FavoriteReferenceMissing("saved reference is no longer available")
+            if _kind_for_mime(saved["type"]) != declaration["kind"]:
+                raise ValueError("saved reference MIME type does not match kind")
+            try:
+                handle = favorites.asset_path(source["username"], source["asset_id"], root).open("rb")
+            except FileNotFoundError as exc:
+                raise FavoriteReferenceMissing("saved reference is no longer available") from exc
+            upload = UploadFile(handle, filename=saved["name"], headers=Headers({"content-type": saved["type"]}))
         if upload is None or not getattr(upload, "filename", ""):
             raise ValueError(f"missing multipart file for reference {declaration['id']}")
         content_type = _content_type(upload)
@@ -1080,6 +1112,8 @@ def create_gateway(
                     raise ValueError("geometry_source is valid only in frames mode")
                 if (config["width"], config["height"]) not in NATIVE_CANVASES[config["resolution"]]:
                     raise ValueError(f"canvas does not match the {config['resolution']} native presets")
+                if any(isinstance(entry, dict) and "favorite" in entry for entry in config["references"]):
+                    await call_modal_async(output_volume.reload)
                 staged_references, public_references = await _stage_references(
                     form=form,
                     config=config,
@@ -1092,7 +1126,7 @@ def create_gateway(
         except ValueError as exc:
             await _close_form_uploads(form)
             shutil.rmtree(jobs.input_dir(job_id, root), ignore_errors=True)
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
+            raise HTTPException(status_code=409 if isinstance(exc, FavoriteReferenceMissing) else 422, detail=str(exc)) from exc
 
         # Starlette keeps multipart file handles open for the lifetime of the
         # form object. Every accepted upload has already been copied/read, so

@@ -29,7 +29,7 @@ function frameGeometry(draft: FramesDraft, specs: H3Specs) {
   return { width, height, geometrySource: source.role };
 }
 
-export function buildCreateJobRequest(draft: ComposerDraft, specs: H3Specs) {
+export function buildCreateJobRequest(draft: ComposerDraft, specs: H3Specs, savedReferences: Map<string, string> = new Map()) {
   const resolution = "480p" as const;
   const preset = specs.output.geometry.resolutions[resolution].native_aspects.find((candidate) => candidate.id === draft.aspect);
   if (!preset) throw new Error(`The H3 API does not support aspect ${draft.aspect}.`);
@@ -39,6 +39,7 @@ export function buildCreateJobRequest(draft: ComposerDraft, specs: H3Specs) {
     kind: asset.kind,
     use_audio: false,
     field: `attachment_${index}`,
+    ...(savedReferences.has(asset.id) ? { favorite: { username: savedReferences.get(asset.id), asset_id: asset.id } } : {}),
   })) : [];
   const body = new FormData();
   const profileId = samplingProfileId(draft);
@@ -69,7 +70,9 @@ export function buildCreateJobRequest(draft: ComposerDraft, specs: H3Specs) {
     if (draft.firstFrame) body.set("first_frame", draft.firstFrame.file, draft.firstFrame.name);
     if (draft.lastFrame) body.set("last_frame", draft.lastFrame.file, draft.lastFrame.name);
   } else {
-    draft.references.forEach((asset, index) => body.set(`attachment_${index}`, asset.file, asset.name));
+    draft.references.forEach((asset, index) => {
+      if (!savedReferences.has(asset.id)) body.set(`attachment_${index}`, asset.file, asset.name);
+    });
   }
   return body;
 }

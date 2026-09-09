@@ -2,6 +2,7 @@ import type { ComposerDraft, FavoriteAsset, H3Specs, Job, MediaAsset } from "../
 import { parseFavoriteSnapshot } from "../favorites";
 import { parseJobCreate, parseJobStatus, parseSpecs } from "./contracts";
 import { buildCreateJobRequest } from "./createJobRequest";
+import { readCloudSyncUsername } from "../cloudSync";
 
 const API_BASE = "/api";
 
@@ -33,11 +34,33 @@ export async function getSpecs() {
 }
 
 export async function createJob(draft: ComposerDraft, specs: H3Specs) {
-  const response = await request("/jobs", {
+  const savedReferences = new Map<string, string>();
+  const username = readCloudSyncUsername();
+  if (username && draft.mode === "references") {
+    try {
+      const favorites = await getFavorites(username);
+      const saved = favorites.flatMap((job) => job.favoriteAssets ?? []);
+      for (const asset of draft.references) {
+        if (saved.some((candidate) => candidate.id === asset.id && candidate.type === asset.type && candidate.size === asset.size)) {
+          savedReferences.set(asset.id, username);
+        }
+      }
+    } catch {
+      // Cloud lookup is optional; the browser still has the source files.
+    }
+  }
+  const submit = (references: Map<string, string>) => request("/jobs", {
     method: "POST",
     headers: { Accept: "application/json" },
-    body: buildCreateJobRequest(draft, specs),
+    body: buildCreateJobRequest(draft, specs, references),
   });
+  let response: Response;
+  try {
+    response = await submit(savedReferences);
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 409 || !savedReferences.size) throw error;
+    response = await submit(new Map());
+  }
   return parseJobCreate(await response.json());
 }
 

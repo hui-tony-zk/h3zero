@@ -616,6 +616,52 @@ class GatewayTests(unittest.TestCase):
         self.assertTrue(payload["references"][2]["staged_filename"].endswith("-24fps.mp4"))
         self.assertTrue(jobs.input_dir(submitted["id"], self.output_root).is_dir())
 
+    def test_saved_reference_is_copied_and_survives_job_cleanup(self):
+        source = favorites.asset_path("alice", "saved-image", self.output_root)
+        source.parent.mkdir(parents=True)
+        source.write_bytes(self.png())
+        favorites.write_favorite("alice", {
+            "id": "a" * 32,
+            "favoriteAssets": [{"id": "saved-image", "name": "saved.png", "type": "image/png"}],
+        }, self.output_root)
+        response = self.client.post("/api/jobs", data={
+            "prompt": "Use both images",
+            "config": json.dumps({"mode": "references", "references": [
+                {"id": "saved-image", "kind": "image", "favorite": {"username": "alice", "asset_id": "saved-image"}},
+                {"id": "fresh", "kind": "image", "field": "fresh"},
+            ]}),
+        }, files={"fresh": ("fresh.png", self.png(), "image/png")})
+        self.assertEqual(response.status_code, 202, response.text)
+        job_id = response.json()["id"]
+        references = self.service.generate.submissions[0]["references"]
+        self.assertEqual([entry["id"] for entry in references], ["saved-image", "fresh"])
+        self.assertEqual(jobs.input_path(job_id, references[0]["staged_filename"], self.output_root).read_bytes(), self.png())
+        jobs.delete_job_artifacts(job_id, self.output_root)
+        self.assertEqual(source.read_bytes(), self.png())
+        self.assertEqual(self.volume.reloads, 1)
+
+    def test_missing_saved_reference_cleans_staged_uploads_without_spawning(self):
+        response = self.client.post("/api/jobs", data={
+            "prompt": "Use both images",
+            "config": json.dumps({"mode": "references", "references": [
+                {"id": "fresh", "kind": "image", "field": "fresh"},
+                {"id": "missing", "kind": "image", "favorite": {"username": "alice", "asset_id": "missing"}},
+            ]}),
+        }, files={"fresh": ("fresh.png", self.png(), "image/png")})
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(self.service.generate.submissions, [])
+        self.assertEqual(list((self.output_root / "inputs").iterdir()), [])
+
+    def test_saved_reference_rejects_path_traversal(self):
+        response = self.client.post("/api/jobs", data={
+            "prompt": "Use image",
+            "config": json.dumps({"mode": "references", "references": [
+                {"id": "saved", "kind": "image", "favorite": {"username": "alice", "asset_id": "../escape"}},
+            ]}),
+        })
+        self.assertEqual(response.status_code, 422, response.text)
+        self.assertEqual(self.service.generate.submissions, [])
+
     def test_reference_preflight_rejects_audio_only(self):
         response = self.client.post(
             "/api/jobs",

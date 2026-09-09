@@ -66,6 +66,7 @@ def _entry_from_named_value(name: str, value: str | Mapping) -> dict:
         raise ValueError(f"LoRA {name} must be a download URL or mapping")
     entry = _entry_from_url(name, value.get("download_url"))
     entry["reference_url"] = value.get("reference_url")
+    entry["aliases"] = value.get("aliases", ())
     return entry
 
 

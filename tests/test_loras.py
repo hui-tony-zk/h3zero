@@ -59,6 +59,20 @@ class LoraConfigTests(unittest.TestCase):
                 }
             })
 
+    def test_named_catalog_preserves_migration_aliases(self):
+        configured = loras.normalize_loras({
+            "Style V2": {
+                "download_url": "https://huggingface.co/owner/repo/resolve/main/style-v2.safetensors",
+                "aliases": ["style-v1"],
+            }
+        })
+        with patch("minimax_h3.loras.CONFIGURED_LORAS", configured):
+            self.assertEqual(loras.public_loras()[0]["aliases"], ["style-v1"])
+            self.assertEqual(
+                loras.resolve_lora_strengths({"style-v1": 0.8}),
+                {"style-v2": 0.8},
+            )
+
     def test_rejects_unconfigured_and_out_of_range_loras(self):
         configured = loras.normalize_loras([self.entry()])
         with patch("minimax_h3.loras.CONFIGURED_LORAS", configured):
